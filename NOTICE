@@ -1,0 +1,57 @@
+sPad++ 使用的第三方元件與授權
+================================
+
+1. Scintilla 與 Lexilla
+-----------------------
+檔案位置：third_party/scintilla/、third_party/lexilla/
+授權：Historical Permission Notice and Disclaimer（HPND）
+      https://www.scintilla.org/License.txt
+
+  Copyright 1998-2021 by Neil Hodgson <neilh@scintilla.org>
+  All Rights Reserved
+
+  Permission to use, copy, modify, and distribute this software and its
+  documentation for any purpose and without fee is hereby granted,
+  provided that the above copyright notice appear in all copies and that
+  both that copyright notice and this permission notice appear in
+  supporting documentation.
+
+  NEIL HODGSON DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+  INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+  EVENT SHALL NEIL HODGSON BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+  CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
+  USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+  PERFORMANCE OF THIS SOFTWARE.
+
+這是非 copyleft 授權，不會影響 sPad++ 本身的授權，
+但上述版權聲明必須完整保留。
+
+
+2. uchardet
+-----------
+檔案位置：third_party/uchardet/
+來源：https://github.com/BYVoid/uchardet
+      （本專案是從 Notepad++ 原始碼樹中整份取用，該處也是原封不動的 vendored 版本）
+授權：MPL 1.1 / GPL 2.0 or later / LGPL 2.1 or later（三選一）
+
+  uchardet 是 Mozilla 通用字元集偵測函式庫的 C 語言綁定。
+
+  Copyright (C) 2006-2012 BYVoid 與貢獻者
+
+  每個原始檔都保留原本的三選一授權標頭。本專案採用
+  「GPL 2.0 or later」這一條，與 sPad++ 的 GPL-3.0-or-later 相容；
+  uchardet 的檔案本身仍可依上述三種授權任一使用。
+
+  MPL 1.1 條文：https://www.mozilla.org/MPL/1.1/
+  LGPL 2.1 條文：https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+
+3. Notepad++
+------------
+本專案與編譯出的應用程式**沒有包含** Notepad++ 的任何程式碼、二進位檔
+或資料檔（主題、語言定義、語系檔皆無）。sPad++ 是獨立實作，
+只借用功能構想。
+
+Notepad++ 版權為 Don HO 所有，以 GNU General Public License 第 3 版散布。
+「Notepad++」是該專案的名稱；本專案與其無隸屬關係，也未獲其背書。
