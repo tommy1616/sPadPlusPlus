@@ -1,6 +1,6 @@
-# sPad++ — Notepad++ → macOS 移植可行性 spike
+# sPad++ — macOS 原生文字編輯器（以 Scintilla 為編輯引擎）
 #
-# 直接編譯 Scintilla core + Cocoa 平台層 + Lexilla（靜態），不打 Xcode project。
+# 直接用 clang 編譯 Scintilla 核心 + Cocoa 平台層 + Lexilla（靜態庫），不使用 Xcode project。
 
 APP      := sPad++
 BUNDLE   := $(APP).app
@@ -38,14 +38,14 @@ all: $(BIN)
 deps: $(LEXILLA_A)
 
 $(LEXILLA_A):
-	@echo "== building Lexilla (127 lexers, first time only) =="
+	@echo "== 編譯 Lexilla（127 個 lexer，只有第一次需要） =="
 	@cd $(LX)/src && mkdir -p ../bin && \
 	 LEXERS=$$(ls ../lexers/Lex*.cxx | xargs -n1 basename | grep -v '^LexUser.cxx$$' | tr '\n' ' ') && \
 	 make -j8 LEXERS="$$LEXERS" ../bin/liblexilla.a
-	@echo "built: $(LEXILLA_A)"
+	@echo "完成：$(LEXILLA_A)"
 
 check-lexilla:
-	@test -f $(LEXILLA_A) || (echo "缺少 $(LEXILLA_A)；先在 src/lexilla/src 執行 make"; exit 1)
+	@test -f $(LEXILLA_A) || (echo "缺少 $(LEXILLA_A)；請先執行 make deps"; exit 1)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
@@ -72,7 +72,7 @@ $(BIN): $(OBJS) $(LEXILLA_A) AppIcon.icns Assets.car
 	@cp AppIcon.icns $(BUNDLE)/Contents/Resources/AppIcon.icns
 	@if [ -f Assets.car ]; then cp Assets.car $(BUNDLE)/Contents/Resources/Assets.car; fi
 	$(CXX) $(ARCH) -o $@ $(OBJS) $(LEXILLA_A) $(LDFLAGS)
-	@echo "built: $(BIN)"
+	@echo "完成：$(BIN)"
 
 run: all
 	./$(BIN)
@@ -83,7 +83,7 @@ Assets.car: AppIcon.xcassets
 	@-xcrun actool AppIcon.xcassets --compile . --platform macosx \
 		--minimum-deployment-target 11.0 --app-icon AppIcon \
 		--output-partial-info-plist /tmp/npp-partial.plist >/dev/null 2>&1 \
-		&& echo "built: Assets.car" || echo "skip: Assets.car (需要 Xcode)"
+		&& echo "完成：Assets.car" || echo "略過：Assets.car（需要 Xcode）"
 
 AppIcon.icns: ../icons/icon_B.png
 	@rm -rf AppIcon.iconset && mkdir -p AppIcon.iconset
@@ -92,7 +92,7 @@ specs=[(16,'16x16'),(32,'16x16@2x'),(32,'32x32'),(64,'32x32@2x'),(128,'128x128')
 (256,'128x128@2x'),(256,'256x256'),(512,'256x256@2x'),(512,'512x512'),(1024,'512x512@2x')]; \
 [src.resize((p,p), Image.LANCZOS).save(f'AppIcon.iconset/icon_{n}.png') for p,n in specs]"
 	@iconutil -c icns AppIcon.iconset -o AppIcon.icns
-	@echo "built: AppIcon.icns"
+	@echo "完成：AppIcon.icns"
 
 clean:
 	rm -rf $(BUILD) $(BUNDLE) AppIcon.iconset
