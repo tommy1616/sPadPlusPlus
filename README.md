@@ -127,6 +127,17 @@ Notepad++ 的 Win32 層負責的東西——訊息迴圈、對話框、docking�
 
 ---
 
+## App 圖示
+
+- 分層素材：`scripts/icon-layers/`（背景、卡片、程式碼、游標）
+  → `scripts/gen_icon_layers.py` 合成滿版單一圖層
+- `macapp/AppIcon.icon/`：macOS 26 的 **Icon Composer 格式**（`icon.json` + `Assets/`）
+- `macapp/build-icons.sh`：有 Xcode 26 時用 `actool` 編成 `Assets.car`（滿版圖示）；
+  沒有就退回舊式 `.icns`（會被 macOS 26 套上白色底座）
+
+> **踩過的坑**：`.icon` 裡如果放多個 group，第二個之後會被系統當成「漂浮玻璃層」
+> 而整片模糊掉。所以主視覺必須**壓成一張圖、只用一個 group**。
+
 ## 設成預設的文字開啟程式
 
 App 已經把「文字類」宣告成 `LSHandlerRank = Default`（`public.data` 保持 `Alternate`，

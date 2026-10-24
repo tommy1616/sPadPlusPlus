@@ -65,11 +65,12 @@ $(BUILD)/uch_%.o: $(UCH)/%.cpp | $(BUILD)
 $(BUILD)/main.o: main.mm | $(BUILD)
 	@$(CXX) $(CXXFLAGS) -x objective-c++ $(OBJCFLAGS) -c $< -o $@
 
-$(BIN): $(OBJS) $(LEXILLA_A) AppIcon.icns Assets.car $(wildcard Themes/*.xml) \
-        $(wildcard Resources/*.lproj/Localizable.strings) Info.plist
+$(BIN): $(OBJS) $(LEXILLA_A) $(wildcard Themes/*.xml) \
+        $(wildcard Resources/*.lproj/Localizable.strings) $(wildcard AppIcon.icon/**) Info.plist
 	@mkdir -p $(BUNDLE)/Contents/MacOS
 	@mkdir -p $(BUNDLE)/Contents/Resources
 	@cp Info.plist $(BUNDLE)/Contents/Info.plist
+	@./build-icons.sh
 	@cp AppIcon.icns $(BUNDLE)/Contents/Resources/AppIcon.icns
 	@mkdir -p $(BUNDLE)/Contents/Resources/Themes
 	@cp Themes/*.xml $(BUNDLE)/Contents/Resources/Themes/
@@ -82,22 +83,8 @@ $(BIN): $(OBJS) $(LEXILLA_A) AppIcon.icns Assets.car $(wildcard Themes/*.xml) \
 run: all
 	./$(BIN)
 
-icons: AppIcon.icns Assets.car
-
-Assets.car: AppIcon.xcassets
-	@-xcrun actool AppIcon.xcassets --compile . --platform macosx \
-		--minimum-deployment-target 11.0 --app-icon AppIcon \
-		--output-partial-info-plist /tmp/npp-partial.plist >/dev/null 2>&1 \
-		&& echo "完成：Assets.car" || echo "略過：Assets.car（需要 Xcode）"
-
-AppIcon.icns: ../icons/icon_B.png
-	@rm -rf AppIcon.iconset && mkdir -p AppIcon.iconset
-	@python3 -c "from PIL import Image; src=Image.open('../icons/icon_B.png').convert('RGBA'); \
-specs=[(16,'16x16'),(32,'16x16@2x'),(32,'32x32'),(64,'32x32@2x'),(128,'128x128'), \
-(256,'128x128@2x'),(256,'256x256'),(512,'256x256@2x'),(512,'512x512'),(1024,'512x512@2x')]; \
-[src.resize((p,p), Image.LANCZOS).save(f'AppIcon.iconset/icon_{n}.png') for p,n in specs]"
-	@iconutil -c icns AppIcon.iconset -o AppIcon.icns
-	@echo "完成：AppIcon.icns"
+icons:
+	@./build-icons.sh
 
 clean:
 	rm -rf $(BUILD) $(BUNDLE) AppIcon.iconset
