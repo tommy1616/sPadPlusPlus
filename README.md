@@ -34,6 +34,16 @@
 - 支援 C++11 正規表示式（`SCFIND_CXX11REGEX`）、全字拼寫、大小寫、循環搜尋
 - 檔案中尋找：跑在背景佇列、可中途取消、結果表格點兩下直接跳到該行
 
+### 主題
+
+- **6 套內建主題**（我們自己設計，非取自 Notepad++）：
+  **墨 Ink**、**夜藍 Midnight**、**終端機 Terminal**（深色）、
+  **紙 Paper**、**霧 Mist**、**高對比 Contrast**（淺色／無障礙）
+- **格式與 Notepad++ 的 `themes/*.xml` 相容** —— 直接把 NPP 的主題檔丟進
+  `~/Library/Application Support/sPad++/themes/`，重新載入就能用
+  （已用 NPP 官方 `Obsidian.xml` 實測通過）
+- 選單：**顯示 → 主題**；選擇會記住
+
 ### 編輯
 
 - 127 個 Lexilla 語法解析器、深色／淺色主題

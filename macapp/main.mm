@@ -252,6 +252,7 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 @property (nonatomic)         long caret;
 @property (nonatomic)         long firstVisibleLine;
 @property (nonatomic)         BOOL metaDirty;      // 只改編碼/EOL、還沒改內容時用
+@property (nonatomic, copy)   NSString *lexerName;  // 目前使用中的 Lexilla lexer
 
 - (NSString *)title;
 - (BOOL)isDirty;
@@ -492,7 +493,7 @@ typedef struct {
 #define INDIC_WORD 30
 
 #define MARK_BOOKMARK 24
-#define MARK_MATCH    25
+#define MARK_MATCH    22   // 25 以上會被 Scintilla 當成摺疊標記
 
 static NSTextField *fp_label(NSString *s)
 {
@@ -1052,6 +1053,201 @@ static void npp_exception_handler(NSException *e)
 @implementation FIFJob
 @end
 
+
+//--------------------------------------------------------------------------------------------------
+#pragma mark - 主題（Notepad++ themes/*.xml 相容）
+
+static NSColor *theme_color(NSString *hex, NSColor *fallback)
+{
+    if (hex.length < 6) return fallback;
+    unsigned v = 0;
+    if (![[NSScanner scannerWithString:hex] scanHexInt:&v]) return fallback;
+    return [NSColor colorWithSRGBRed:((v >> 16) & 0xFF) / 255.0
+                               green:((v >> 8) & 0xFF) / 255.0
+                                blue:(v & 0xFF) / 255.0 alpha:1.0];
+}
+
+@interface Theme : NSObject
+@property (nonatomic, copy) NSString *identifier;
+@property (nonatomic, copy) NSString *displayName;
+@property (nonatomic, copy) NSString *path;
+@property (nonatomic, strong) NSDictionary *globals;   // widget 名稱 -> @{fg,bg}
+@property (nonatomic, strong) NSDictionary *lexers;    // lexer 名稱 -> @{ @(styleID): @{fg,bg,style} }
+@property (nonatomic) BOOL dark;
+
+- (NSColor *)background;
+- (NSColor *)foreground;
+@end
+
+@implementation Theme
+- (NSColor *)background { return theme_color(self.globals[@"Default Style"][@"bg"], [NSColor textBackgroundColor]); }
+- (NSColor *)foreground { return theme_color(self.globals[@"Default Style"][@"fg"], [NSColor textColor]); }
+@end
+
+@interface ThemeParser : NSObject <NSXMLParserDelegate>
+@property (nonatomic, strong) NSMutableDictionary *globals;
+@property (nonatomic, strong) NSMutableDictionary *lexers;
+@property (nonatomic, copy)   NSString *currentLexer;
+@property (nonatomic, copy)   NSString *commentName;
+@end
+
+@implementation ThemeParser
+
+- (void)parser:(NSXMLParser *)parser didStartElement:(NSString *)element
+  namespaceURI:(NSString *)ns qualifiedName:(NSString *)qn attributes:(NSDictionary *)attrs
+{
+    if ([element isEqualToString:@"LexerType"])
+    {
+        self.currentLexer = attrs[@"name"];
+        if (self.currentLexer) self.lexers[self.currentLexer] = [NSMutableDictionary dictionary];
+    }
+    else if ([element isEqualToString:@"WordsStyle"])
+    {
+        if (!self.currentLexer) return;
+        NSString *sid = attrs[@"styleID"];
+        if (!sid) return;
+        NSMutableDictionary *st = [NSMutableDictionary dictionary];
+        if (attrs[@"fgColor"]) st[@"fg"] = attrs[@"fgColor"];
+        if (attrs[@"bgColor"]) st[@"bg"] = attrs[@"bgColor"];
+        if (attrs[@"fontStyle"]) st[@"style"] = attrs[@"fontStyle"];
+        self.lexers[self.currentLexer][@([sid intValue])] = st;
+    }
+    else if ([element isEqualToString:@"WidgetStyle"])
+    {
+        NSString *name = attrs[@"name"];
+        if (!name) return;
+        NSMutableDictionary *st = [NSMutableDictionary dictionary];
+        if (attrs[@"fgColor"]) st[@"fg"] = attrs[@"fgColor"];
+        if (attrs[@"bgColor"]) st[@"bg"] = attrs[@"bgColor"];
+        self.globals[name] = st;
+    }
+}
+
+- (void)parser:(NSXMLParser *)parser foundComment:(NSString *)comment
+{
+    NSString *prefix = @"sPad++ 內建主題：";
+    NSString *t = [comment stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([t hasPrefix:prefix]) self.commentName = [t substringFromIndex:prefix.length];
+}
+
+@end
+
+@interface ThemeManager : NSObject
+@property (nonatomic, strong) NSMutableArray<Theme *> *themes;
+@property (nonatomic, strong) Theme *current;
++ (instancetype)shared;
+- (void)reload;
+- (BOOL)selectTheme:(NSString *)identifier;
+- (NSString *)userThemeDirectory;
+@property (nonatomic, copy) NSString *themeDirectory;
+@end
+
+@implementation ThemeManager
+
++ (instancetype)shared
+{
+    static ThemeManager *m = nil;
+    if (!m) m = [[ThemeManager alloc] init];
+    return m;
+}
+
+- (NSString *)userThemeDirectory
+{
+    NSString *dir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,
+                                                          NSUserDomainMask, YES) firstObject];
+    return [[dir stringByAppendingPathComponent:@"sPad++"] stringByAppendingPathComponent:@"themes"];
+}
+
+- (Theme *)loadThemeAtPath:(NSString *)path
+{
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) return nil;
+
+    ThemeParser *tp = [[ThemeParser alloc] init];
+    tp.globals = [NSMutableDictionary dictionary];
+    tp.lexers = [NSMutableDictionary dictionary];
+
+    NSXMLParser *p = [[NSXMLParser alloc] initWithData:data];
+    p.delegate = tp;
+    if (![p parse]) return nil;
+
+    if (tp.globals[@"Default Style"] == nil && tp.lexers.count == 0) return nil;
+
+    Theme *t = [[Theme alloc] init];
+    t.path = path;
+    t.identifier = [[path lastPathComponent] stringByDeletingPathExtension];
+    t.displayName = tp.commentName.length ? tp.commentName
+                                          : [t.identifier stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    t.globals = tp.globals;
+    t.lexers = tp.lexers;
+
+    NSColor *bg = [t background];
+    CGFloat r = 0, g = 0, b = 0, a = 0;
+    NSColor *rgb = [bg colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+    [rgb getRed:&r green:&g blue:&b alpha:&a];
+    t.dark = (0.299 * r + 0.587 * g + 0.114 * b) < 0.5;
+    return t;
+}
+
+- (void)reload
+{
+    self.themes = [NSMutableArray array];
+
+    NSString *bundled = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"Themes"];
+    NSString *user = [self userThemeDirectory];
+
+    // 先內建，再使用者（同名時使用者優先）
+    NSMutableDictionary *byId = [NSMutableDictionary dictionary];
+    for (NSString *dir in @[ bundled, user ])
+    {
+        for (NSString *f in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:NULL])
+        {
+            if (![[f pathExtension] isEqualToString:@"xml"]) continue;
+            Theme *t = [self loadThemeAtPath:[dir stringByAppendingPathComponent:f]];
+            if (t) byId[t.identifier] = t;
+        }
+    }
+
+    self.themes = [[byId.allValues sortedArrayUsingComparator:^NSComparisonResult(Theme *a, Theme *b) {
+        return [a.displayName compare:b.displayName];
+    }] mutableCopy];
+
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"ThemeName"];
+    for (Theme *t in self.themes)
+        if ([t.identifier isEqualToString:saved]) { self.current = t; break; }
+
+    if (!self.current)
+    {
+        BOOL systemDark = NO;
+        if (@available(macOS 10.14, *))
+            systemDark = [[NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:
+                           @[ NSAppearanceNameDarkAqua, NSAppearanceNameAqua ]]
+                          isEqualToString:NSAppearanceNameDarkAqua];
+        NSString *want = systemDark ? @"ink" : @"mist";
+        for (Theme *t in self.themes)
+            if ([t.identifier isEqualToString:want]) { self.current = t; break; }
+        if (!self.current) self.current = self.themes.firstObject;
+    }
+
+    [[NSUserDefaults standardUserDefaults] setObject:self.current.identifier forKey:@"ThemeName"];
+}
+
+- (BOOL)selectTheme:(NSString *)identifier
+{
+    for (Theme *t in self.themes)
+    {
+        if ([t.identifier isEqualToString:identifier])
+        {
+            self.current = t;
+            [[NSUserDefaults standardUserDefaults] setObject:t.identifier forKey:@"ThemeName"];
+            return YES;
+        }
+    }
+    return NO;
+}
+
+@end
+
 //--------------------------------------------------------------------------------------------------
 #pragma mark - AppDelegate
 
@@ -1081,6 +1277,7 @@ static void npp_exception_handler(NSException *e)
     NSString       *_lastWord;
     BOOL            _showWS;
     BOOL            _showEOL;
+    NSMenu         *_themeMenu;
     id              _fifJob;
     NSUInteger      _fifGen;
     BOOL            _fifRunning;
@@ -1095,6 +1292,7 @@ static void npp_exception_handler(NSException *e)
 - (void)applicationDidFinishLaunching:(NSNotification *)note
 {
     NSSetUncaughtExceptionHandler(npp_exception_handler);
+    [[ThemeManager shared] reload];
     npp_log(@"launch args=%@", [[[NSProcessInfo processInfo] arguments] componentsJoinedByString:@" "]);
     _docs = [NSMutableArray array];
     _openPaths = [NSMutableArray array];
@@ -1332,7 +1530,11 @@ static void npp_exception_handler(NSException *e)
     [bar addItem:viewItem];
     NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
     [viewItem setSubmenu:viewMenu];
-    [viewMenu addItemWithTitle:@"Toggle Dark Mode" action:@selector(toggleDark:) keyEquivalent:@"d"];
+    NSMenuItem *themeItem = [[NSMenuItem alloc] initWithTitle:@"主題" action:nil keyEquivalent:@""];
+    _themeMenu = [[NSMenu alloc] initWithTitle:@"主題"];
+    [themeItem setSubmenu:_themeMenu];
+    [viewMenu addItem:themeItem];
+    [self rebuildThemeMenu];
     [viewMenu addItemWithTitle:@"Toggle Line Numbers" action:@selector(toggleLineNumbers:) keyEquivalent:@""];
     [viewMenu addItemWithTitle:@"Toggle Word Wrap" action:@selector(toggleWrap:) keyEquivalent:@""];
 
@@ -1365,25 +1567,29 @@ static void npp_exception_handler(NSException *e)
     [encMenu addItemWithTitle:@"Convert to UTF-8" action:@selector(convertToUTF8:) keyEquivalent:@""];
 }
 
-- (void)applyTheme:(BOOL)dark
+- (void)applyTheme:(BOOL)ignored
 {
-    _dark = dark;
-    [_tabBar setDark:dark];
-    [_tabBar setNeedsDisplay:YES];
-
-    NSColor *sbText = dark ? hex_rgb(0xB0B0B0) : hex_rgb(0x555555);
-    [_statusLeft setTextColor:sbText];
-    [_statusRight setTextColor:sbText];
-    [_statusBar setWantsLayer:YES];
-    _statusBar.layer.backgroundColor = (dark ? hex_rgb(0x252526) : hex_rgb(0xF2F2F2)).CGColor;
-    [_window setBackgroundColor:dark ? hex_rgb(0x1E1E1E) : [NSColor whiteColor]];
-    [_window setAppearance:[NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua]];
-
+    [self applyChromeColors];
     for (Doc *d in _docs) [self styleEditor:d];
 }
 
-//--------------------------------------------------------------------------------------------------
-#pragma mark 編輯器樣式
+- (void)applyChromeColors
+{
+    Theme *t = [ThemeManager shared].current;
+    _dark = t ? t.dark : YES;
+
+    NSColor *bg = t ? [t background] : hex_rgb(0x1E1E1E);
+    [_window setBackgroundColor:bg];
+    [_window setAppearance:[NSAppearance appearanceNamed:_dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua]];
+
+    NSColor *sbText = _dark ? hex_rgb(0xB0B0B0) : hex_rgb(0x555555);
+    [_statusLeft setTextColor:sbText];
+    [_statusRight setTextColor:sbText];
+    [_statusBar setWantsLayer:YES];
+    _statusBar.layer.backgroundColor = (_dark ? hex_rgb(0x252526) : hex_rgb(0xF2F2F2)).CGColor;
+    [_tabBar setDark:_dark];
+    [_tabBar setNeedsDisplay:YES];
+}
 
 - (void)styleEditor:(Doc *)doc
 {
@@ -1397,80 +1603,99 @@ static void npp_exception_handler(NSException *e)
 
     [e setGeneralProperty:SCI_SETMARGINTYPEN parameter:0 value:SC_MARGIN_NUMBER];
     [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:0 value:52];
-    [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:1 value:0];
     [e setGeneralProperty:SCI_SETTABWIDTH value:4];
     [e setGeneralProperty:SCI_SETUSETABS value:0];
     [e setGeneralProperty:SCI_SETCARETLINEVISIBLE value:1];
     [e setGeneralProperty:SCI_SETCARETLINEBACKALPHA value:40];
     [e setGeneralProperty:SCI_SETSELALPHA value:120];
     [e setGeneralProperty:SCI_SETCODEPAGE value:SC_CP_UTF8];
-
-    // 多游標（Scintilla 5.6 預設關閉）
     [e setGeneralProperty:SCI_SETMULTIPLESELECTION value:1];
-
-    // 註：Alt + 拖曳 = 欄位（矩形）選取，Scintilla 原生支援
-    //     （SCI_SETRECTANGULARSELECTIONMODIFIER 在 5.6 已無實作，別用）
 
     // 單字高亮（indicator 30）
     [e message:SCI_INDICSETSTYLE wParam:INDIC_WORD lParam:INDIC_ROUNDBOX];
-    [e message:SCI_INDICSETFORE  wParam:INDIC_WORD lParam:(sptr_t)(_dark ? 0x8C7A4B : 0xE0C89A)];   // BGR：淡藍
+    [e message:SCI_INDICSETFORE  wParam:INDIC_WORD lParam:(sptr_t)(_dark ? 0x8C7A4B : 0xE0C89A)];   // BGR
     [e message:SCI_INDICSETALPHA wParam:INDIC_WORD lParam:45];
     [e message:SCI_INDICSETOUTLINEALPHA wParam:INDIC_WORD lParam:90];
 
-    [e setGeneralProperty:SCI_SETVIEWWS value:(_showWS ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE)];
-    [e setGeneralProperty:SCI_SETVIEWEOL value:(_showEOL ? 1 : 0)];
-
-    NSColor *fore = _dark ? hex_rgb(0xD4D4D4) : hex_rgb(0x1F1F1F);
-    NSColor *back = _dark ? hex_rgb(0x1E1E1E) : hex_rgb(0xFFFFFF);
-    [e setColorProperty:SCI_STYLESETFORE parameter:STYLE_DEFAULT value:fore];
-    [e setColorProperty:SCI_STYLESETBACK parameter:STYLE_DEFAULT value:back];
-    [e setGeneralProperty:SCI_STYLECLEARALL value:0];
-
-    [e setColorProperty:SCI_STYLESETFORE parameter:STYLE_LINENUMBER value:(_dark ? hex_rgb(0x858585) : hex_rgb(0x999999))];
-    [e setColorProperty:SCI_STYLESETBACK parameter:STYLE_LINENUMBER value:(_dark ? hex_rgb(0x1E1E1E) : hex_rgb(0xF3F3F3))];
-    [e setColorProperty:SCI_SETCARETFORE parameter:0 value:(_dark ? hex_rgb(0xAEAFAD) : hex_rgb(0x000000))];
-    [e setColorProperty:SCI_SETCARETLINEBACK parameter:0 value:(_dark ? hex_rgb(0x2A2D2E) : hex_rgb(0xF7F7F7))];
-    [e setColorProperty:SCI_SETSELBACK parameter:1 value:(_dark ? hex_rgb(0x264F78) : hex_rgb(0xB5D5FF))];
-
-    // 搜尋結果高亮（indicator 31，慣例值）
+    // 搜尋結果高亮（indicator 31）
     [e message:SCI_INDICSETSTYLE wParam:INDIC_FIND lParam:INDIC_ROUNDBOX];
-    [e message:SCI_INDICSETFORE  wParam:INDIC_FIND lParam:(sptr_t)(_dark ? 0x30A0E0 : 0x009AFF)];   // BGR：橘色
+    [e message:SCI_INDICSETFORE  wParam:INDIC_FIND lParam:(sptr_t)(_dark ? 0x30A0E0 : 0x009AFF)];   // BGR：橘
     [e message:SCI_INDICSETALPHA wParam:INDIC_FIND lParam:60];
     [e message:SCI_INDICSETOUTLINEALPHA wParam:INDIC_FIND lParam:140];
     [e message:SCI_INDICSETUNDER wParam:INDIC_FIND lParam:1];
 
-    // 書籤：邊界符號；標記：整行背景
+    // 書籤與標記
     [e message:SCI_MARKERDEFINE wParam:MARK_BOOKMARK lParam:SC_MARK_BOOKMARK];
     [e message:SCI_MARKERSETFORE wParam:MARK_BOOKMARK lParam:(sptr_t)(_dark ? 0xFFA95A : 0xDB6F2A)];  // BGR
-    [e message:SCI_MARKERSETBACK wParam:MARK_BOOKMARK lParam:(sptr_t)(_dark ? 0xFFA95A : 0xDB6F2A)];  // BGR
+    [e message:SCI_MARKERSETBACK wParam:MARK_BOOKMARK lParam:(sptr_t)(_dark ? 0xFFA95A : 0xDB6F2A)];
     [e message:SCI_MARKERDEFINE wParam:MARK_MATCH lParam:SC_MARK_CIRCLE];
     [e message:SCI_MARKERSETLAYER wParam:MARK_MATCH lParam:SC_LAYER_OVER_TEXT];
-    [e message:SCI_MARKERSETBACK wParam:MARK_MATCH lParam:(sptr_t)(_dark ? 0x6FD06F : 0x3FA83F)];   // BGR：綠
+    [e message:SCI_MARKERSETBACK wParam:MARK_MATCH lParam:(sptr_t)(_dark ? 0x6FD06F : 0x3FA83F)];
     [e message:SCI_MARKERSETALPHA wParam:MARK_MATCH lParam:255];
 
+    // 書籤與標記共用同一個符號邊界（第 1 欄）
     [e setGeneralProperty:SCI_SETMARGINTYPEN parameter:1 value:SC_MARGIN_SYMBOL];
-    [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:1 value:16];
-    [e setGeneralProperty:SCI_SETMARGINMASKN parameter:1 value:(1L << MARK_BOOKMARK)];
-    [e setGeneralProperty:SCI_SETMARGINTYPEN parameter:2 value:SC_MARGIN_SYMBOL];
-    [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:2 value:12];
-    [e setGeneralProperty:SCI_SETMARGINMASKN parameter:2 value:(1L << MARK_MATCH)];
+    [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:1 value:22];
+    [e setGeneralProperty:SCI_SETMARGINMASKN parameter:1
+                      value:(sptr_t)((1L << MARK_BOOKMARK) | (1L << MARK_MATCH))];
+    [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:2 value:0];
 
-    struct { int style; int rgb; } cmap[] = {
-        { SCE_C_COMMENT,      _dark ? 0x6A9955 : 0x008000 },
-        { SCE_C_COMMENTLINE,  _dark ? 0x6A9955 : 0x008000 },
-        { SCE_C_COMMENTDOC,   _dark ? 0x6A9955 : 0x008000 },
-        { SCE_C_NUMBER,       _dark ? 0xB5CEA8 : 0x098658 },
-        { SCE_C_WORD,         _dark ? 0x569CD6 : 0x0000FF },
-        { SCE_C_WORD2,        _dark ? 0x4EC9B0 : 0x267F99 },
-        { SCE_C_STRING,       _dark ? 0xCE9178 : 0xA31515 },
-        { SCE_C_CHARACTER,    _dark ? 0xCE9178 : 0xA31515 },
-        { SCE_C_PREPROCESSOR, _dark ? 0xC586C0 : 0x808000 },
-        { SCE_C_OPERATOR,     _dark ? 0xD4D4D4 : 0x1F1F1F },
-        { SCE_C_IDENTIFIER,   _dark ? 0xD4D4D4 : 0x1F1F1F },
-        { SCE_C_GLOBALCLASS,  _dark ? 0x4EC9B0 : 0x267F99 },
-    };
-    for (size_t i = 0; i < sizeof(cmap) / sizeof(cmap[0]); i++)
-        [e setColorProperty:SCI_STYLESETFORE parameter:cmap[i].style value:hex_rgb(cmap[i].rgb)];
+    [e setGeneralProperty:SCI_SETVIEWWS value:(_showWS ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE)];
+    [e setGeneralProperty:SCI_SETVIEWEOL value:(_showEOL ? 1 : 0)];
+
+    [self applyThemeColorsTo:doc];
+}
+
+- (void)applyThemeColorsTo:(Doc *)doc
+{
+    ScintillaView *e = doc.view;
+    Theme *t = [ThemeManager shared].current;
+    if (!e || !t) return;
+
+    NSDictionary *g = t.globals;
+    NSColor *fg = theme_color(g[@"Default Style"][@"fg"], hex_rgb(0xD4D4D4));
+    NSColor *bg = theme_color(g[@"Default Style"][@"bg"], hex_rgb(0x1E1E1E));
+
+    [e setColorProperty:SCI_STYLESETFORE parameter:STYLE_DEFAULT value:fg];
+    [e setColorProperty:SCI_STYLESETBACK parameter:STYLE_DEFAULT value:bg];
+    [e message:SCI_STYLECLEARALL wParam:0 lParam:0];
+
+    NSDictionary *ln = g[@"Line number margin"] ?: @{};
+    [e setColorProperty:SCI_STYLESETFORE parameter:STYLE_LINENUMBER value:theme_color(ln[@"fg"], fg)];
+    [e setColorProperty:SCI_STYLESETBACK parameter:STYLE_LINENUMBER value:theme_color(ln[@"bg"], bg)];
+
+    // 書籤／標記邊界的底色（預設是白色，會很突兀）
+    [e setColorProperty:SCI_SETMARGINBACKN parameter:1 value:bg];
+
+    NSDictionary *caret = g[@"Caret colour"] ?: @{};
+    [e setColorProperty:SCI_SETCARETFORE parameter:0 value:theme_color(caret[@"fg"], fg)];
+
+    NSDictionary *cl = g[@"Current line background colour"] ?: @{};
+    [e setColorProperty:SCI_SETCARETLINEBACK parameter:0 value:theme_color(cl[@"bg"], bg)];
+
+    NSDictionary *sel = g[@"Selected text colour"] ?: @{};
+    [e setColorProperty:SCI_SETSELBACK parameter:1 value:theme_color(sel[@"bg"], fg)];
+
+    NSDictionary *ws = g[@"White space symbol"] ?: @{};
+    if (ws[@"fg"]) [e setColorProperty:SCI_SETWHITESPACEFORE parameter:0 value:theme_color(ws[@"fg"], fg)];
+
+    NSDictionary *bm = g[@"Tags match highlighting"] ?: @{};
+    if (bm[@"bg"]) [e setColorProperty:SCI_STYLESETBACK parameter:STYLE_BRACELIGHT value:theme_color(bm[@"bg"], bg)];
+
+    // 語言樣式
+    NSDictionary *styles = t.lexers[doc.lexerName ?: @"normal"] ?: t.lexers[@"normal"];
+    for (NSNumber *sid in styles)
+    {
+        NSDictionary *st = styles[sid];
+        int s = [sid intValue];
+
+        if (st[@"fg"]) [e setColorProperty:SCI_STYLESETFORE parameter:s value:theme_color(st[@"fg"], fg)];
+        if (st[@"bg"]) [e setColorProperty:SCI_STYLESETBACK parameter:s value:theme_color(st[@"bg"], bg)];
+
+        int fs = [st[@"style"] intValue];
+        [e setGeneralProperty:SCI_STYLESETBOLD parameter:s value:(fs & 1) ? 1 : 0];
+        [e setGeneralProperty:SCI_STYLESETITALIC parameter:s value:(fs & 2) ? 1 : 0];
+    }
 }
 
 - (ScintillaView *)makeEditor
@@ -1572,6 +1797,7 @@ static void npp_exception_handler(NSException *e)
     d.view = [self makeEditor];
     d.encoding = @"UTF-8";
     d.eol = @"LF";
+    d.lexerName = @"null";
     [self styleEditor:d];
     [self addDoc:d activate:YES];
     [self updateStatus];
@@ -1623,6 +1849,7 @@ static void npp_exception_handler(NSException *e)
     [d.view message:SCI_SCROLLCARET];
     _tLoad = now_ms() - t0;                         // 只算「讀檔 → 進 Scintilla」
 
+    d.lexerName = [NSString stringWithUTF8String:lexer_for_path(path)];
     Scintilla::ILexer5 *lexer = CreateLexer(lexer_for_path(path));
     if (lexer)
     {
@@ -3156,6 +3383,52 @@ static BOOL is_word_char(unichar c)
     // 先把焦點還給編輯器，否則等一下的 makeFirstResponder 會把清單關掉
     [_window makeFirstResponder:e];
     [e message:SCI_AUTOCSHOW wParam:0 lParam:(sptr_t)[list UTF8String]];
+}
+
+//--------------------------------------------------------------------------------------------------
+#pragma mark 主題切換
+
+- (void)rebuildThemeMenu
+{
+    if (!_themeMenu) return;
+    [_themeMenu removeAllItems];
+
+    Theme *cur = [ThemeManager shared].current;
+    for (Theme *t in [ThemeManager shared].themes)
+    {
+        NSMenuItem *it = [[NSMenuItem alloc] initWithTitle:t.displayName
+                                                    action:@selector(selectTheme:)
+                                             keyEquivalent:@""];
+        [it setRepresentedObject:t.identifier];
+        [it setState:(t == cur) ? NSControlStateValueOn : NSControlStateValueOff];
+        [_themeMenu addItem:it];
+    }
+    [_themeMenu addItem:[NSMenuItem separatorItem]];
+    [_themeMenu addItemWithTitle:@"重新載入主題" action:@selector(reloadThemes:) keyEquivalent:@""];
+    [_themeMenu addItemWithTitle:@"開啟主題資料夾…" action:@selector(openThemeFolder:) keyEquivalent:@""];
+}
+
+- (void)selectTheme:(NSMenuItem *)item
+{
+    if (![[ThemeManager shared] selectTheme:[item representedObject]]) return;
+    [self rebuildThemeMenu];
+    [self applyTheme:YES];
+}
+
+- (void)reloadThemes:(id)sender
+{
+    [[ThemeManager shared] reload];
+    [self rebuildThemeMenu];
+    [self applyTheme:YES];
+    [self flashStatus:[NSString stringWithFormat:@"已載入 %lu 個主題",
+                       (unsigned long)[ThemeManager shared].themes.count]];
+}
+
+- (void)openThemeFolder:(id)sender
+{
+    NSString *dir = [[ThemeManager shared] userThemeDirectory];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:dir]];
 }
 
 //--------------------------------------------------------------------------------------------------
