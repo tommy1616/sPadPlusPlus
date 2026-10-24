@@ -491,6 +491,9 @@ typedef struct {
 #define INDIC_FIND 31
 #define INDIC_WORD 30
 
+#define MARK_BOOKMARK 24
+#define MARK_MATCH    25
+
 static NSTextField *fp_label(NSString *s)
 {
     NSTextField *l = [[NSTextField alloc] init];
@@ -1306,6 +1309,22 @@ static void npp_exception_handler(NSException *e)
     NSMenuItem *acItem = [editMenu addItemWithTitle:@"文字自動完成" action:@selector(showAutoComplete:) keyEquivalent:@"\r"];
     [acItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
     [editMenu addItem:[NSMenuItem separatorItem]];
+
+    NSString *f2 = [NSString stringWithFormat:@"%C", (unichar)NSF2FunctionKey];
+    NSMenuItem *bmItem = [editMenu addItemWithTitle:@"切換書籤" action:@selector(toggleBookmark:) keyEquivalent:f2];
+    [bmItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+    NSMenuItem *bnItem = [editMenu addItemWithTitle:@"下一個書籤" action:@selector(nextBookmark:) keyEquivalent:f2];
+    [bnItem setKeyEquivalentModifierMask:0];
+    NSMenuItem *bpItem = [editMenu addItemWithTitle:@"上一個書籤" action:@selector(prevBookmark:) keyEquivalent:f2];
+    [bpItem setKeyEquivalentModifierMask:NSEventModifierFlagShift];
+
+    [editMenu addItem:[NSMenuItem separatorItem]];
+    NSMenuItem *markItem = [editMenu addItemWithTitle:@"標記全部符合" action:@selector(markAllMatches:) keyEquivalent:@"m"];
+    [markItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
+    NSMenuItem *clearItem = [editMenu addItemWithTitle:@"清除所有標記" action:@selector(clearMarks:) keyEquivalent:@"k"];
+    [clearItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
+
+    [editMenu addItem:[NSMenuItem separatorItem]];
     [editMenu addItemWithTitle:@"Go to Line…" action:@selector(goToLine:) keyEquivalent:@"l"];
 
     // ---- View
@@ -1394,7 +1413,7 @@ static void npp_exception_handler(NSException *e)
 
     // 單字高亮（indicator 30）
     [e message:SCI_INDICSETSTYLE wParam:INDIC_WORD lParam:INDIC_ROUNDBOX];
-    [e message:SCI_INDICSETFORE  wParam:INDIC_WORD lParam:(sptr_t)(_dark ? 0x4B7A8C : 0x9AC8E0)];
+    [e message:SCI_INDICSETFORE  wParam:INDIC_WORD lParam:(sptr_t)(_dark ? 0x8C7A4B : 0xE0C89A)];   // BGR：淡藍
     [e message:SCI_INDICSETALPHA wParam:INDIC_WORD lParam:45];
     [e message:SCI_INDICSETOUTLINEALPHA wParam:INDIC_WORD lParam:90];
 
@@ -1415,10 +1434,26 @@ static void npp_exception_handler(NSException *e)
 
     // 搜尋結果高亮（indicator 31，慣例值）
     [e message:SCI_INDICSETSTYLE wParam:INDIC_FIND lParam:INDIC_ROUNDBOX];
-    [e message:SCI_INDICSETFORE  wParam:INDIC_FIND lParam:(sptr_t)(_dark ? 0xE0A030 : 0xFF9A00)];
+    [e message:SCI_INDICSETFORE  wParam:INDIC_FIND lParam:(sptr_t)(_dark ? 0x30A0E0 : 0x009AFF)];   // BGR：橘色
     [e message:SCI_INDICSETALPHA wParam:INDIC_FIND lParam:60];
     [e message:SCI_INDICSETOUTLINEALPHA wParam:INDIC_FIND lParam:140];
     [e message:SCI_INDICSETUNDER wParam:INDIC_FIND lParam:1];
+
+    // 書籤：邊界符號；標記：整行背景
+    [e message:SCI_MARKERDEFINE wParam:MARK_BOOKMARK lParam:SC_MARK_BOOKMARK];
+    [e message:SCI_MARKERSETFORE wParam:MARK_BOOKMARK lParam:(sptr_t)(_dark ? 0xFFA95A : 0xDB6F2A)];  // BGR
+    [e message:SCI_MARKERSETBACK wParam:MARK_BOOKMARK lParam:(sptr_t)(_dark ? 0xFFA95A : 0xDB6F2A)];  // BGR
+    [e message:SCI_MARKERDEFINE wParam:MARK_MATCH lParam:SC_MARK_CIRCLE];
+    [e message:SCI_MARKERSETLAYER wParam:MARK_MATCH lParam:SC_LAYER_OVER_TEXT];
+    [e message:SCI_MARKERSETBACK wParam:MARK_MATCH lParam:(sptr_t)(_dark ? 0x6FD06F : 0x3FA83F)];   // BGR：綠
+    [e message:SCI_MARKERSETALPHA wParam:MARK_MATCH lParam:255];
+
+    [e setGeneralProperty:SCI_SETMARGINTYPEN parameter:1 value:SC_MARGIN_SYMBOL];
+    [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:1 value:16];
+    [e setGeneralProperty:SCI_SETMARGINMASKN parameter:1 value:(1L << MARK_BOOKMARK)];
+    [e setGeneralProperty:SCI_SETMARGINTYPEN parameter:2 value:SC_MARGIN_SYMBOL];
+    [e setGeneralProperty:SCI_SETMARGINWIDTHN parameter:2 value:12];
+    [e setGeneralProperty:SCI_SETMARGINMASKN parameter:2 value:(1L << MARK_MATCH)];
 
     struct { int style; int rgb; } cmap[] = {
         { SCE_C_COMMENT,      _dark ? 0x6A9955 : 0x008000 },
@@ -2161,7 +2196,41 @@ static void hc_log(NSString *fmt, ...)
     long ind = [e getGeneralProperty:SCI_GETLINEINDENTATION parameter:line];
     fprintf(stdout, "CHECK autoIndent=%ld (want 4)\n", ind);
 
-    // 7) 背景搜尋（先確保面板存在）
+    // 7) 書籤
+    [e message:SCI_GOTOLINE wParam:10];
+    [self toggleBookmark:nil];
+    [e message:SCI_GOTOLINE wParam:0];
+    [self nextBookmark:nil];
+    fprintf(stdout, "CHECK bookmarkLine=%ld (want 10)\n",
+            (long)[e getGeneralProperty:SCI_LINEFROMPOSITION
+                              parameter:[e getGeneralProperty:SCI_GETCURRENTPOS]]);
+    [self toggleBookmark:nil];
+
+    // 8) 全部標記
+    [self findPanel];
+    [_findPanel.findField setStringValue:@"Scintilla"];
+    [self markAllMatches:nil];
+    long markedLines = 0;
+    long totalLines = [e getGeneralProperty:SCI_GETLINECOUNT];
+    for (long ln = 0; ln < totalLines; ln++)
+        if ([e message:SCI_MARKERGET wParam:(uptr_t)ln] & (1L << MARK_MATCH)) markedLines++;
+    fprintf(stdout, "CHECK markedLines=%ld\n", markedLines);
+
+    // 截一張有書籤與標記的圖
+    [e message:SCI_GOTOLINE wParam:30]; [self toggleBookmark:nil];
+    [e message:SCI_GOTOLINE wParam:60]; [self toggleBookmark:nil];
+    [e message:SCI_GOTOLINE wParam:90]; [self toggleBookmark:nil];
+    [e message:SCI_GOTOLINE wParam:70];
+    [e message:SCI_SCROLLCARET];
+    fprintf(stdout, "CHECK markAt74=%ld markAt75=%ld markAt83=%ld\n",
+            (long)([e message:SCI_MARKERGET wParam:74] & (1L << MARK_MATCH)) ? 1 : 0,
+            (long)([e message:SCI_MARKERGET wParam:75] & (1L << MARK_MATCH)) ? 1 : 0,
+            (long)([e message:SCI_MARKERGET wParam:83] & (1L << MARK_MATCH)) ? 1 : 0);
+    saveWindowPNG(_window, @"/tmp/spad_marks.png");
+
+    [self clearMarks:nil];
+
+    // 9) 背景搜尋（先確保面板存在）
     [self findPanel];
     [_findPanel setMode:FPModeFiles];
     [_findPanel.findField setStringValue:@"Notepad"];
@@ -3087,6 +3156,135 @@ static BOOL is_word_char(unichar c)
     // 先把焦點還給編輯器，否則等一下的 makeFirstResponder 會把清單關掉
     [_window makeFirstResponder:e];
     [e message:SCI_AUTOCSHOW wParam:0 lParam:(sptr_t)[list UTF8String]];
+}
+
+//--------------------------------------------------------------------------------------------------
+#pragma mark 書籤與標記
+
+- (void)flashStatus:(NSString *)msg
+{
+    [_statusLeft setStringValue:msg];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateStatus) object:nil];
+    [self performSelector:@selector(updateStatus) withObject:nil afterDelay:1.6];
+}
+
+- (long)lineOfMarker:(int)marker from:(long)startLine backwards:(BOOL)backwards
+{
+    ScintillaView *e = [self editor];
+    long mask = (1L << marker);
+    long total = [e getGeneralProperty:SCI_GETLINECOUNT];
+
+    if (!backwards)
+    {
+        long line = [e message:SCI_MARKERNEXT wParam:(uptr_t)startLine lParam:(sptr_t)mask];
+        if (line < 0) line = [e message:SCI_MARKERNEXT wParam:0 lParam:(sptr_t)mask];   // 繞回開頭
+        return line;
+    }
+
+    long best = -1, l = 0, pos = 0;
+    while (pos < startLine)
+    {
+        l = [e message:SCI_MARKERNEXT wParam:(uptr_t)pos lParam:(sptr_t)mask];
+        if (l < 0 || l >= startLine) break;
+        best = l;
+        pos = l + 1;
+    }
+    if (best >= 0) return best;
+
+    // 從後面繞回
+    pos = startLine;
+    while (pos <= total)
+    {
+        l = [e message:SCI_MARKERNEXT wParam:(uptr_t)pos lParam:(sptr_t)mask];
+        if (l < 0) break;
+        best = l;
+        pos = l + 1;
+    }
+    return best;
+}
+
+- (void)toggleBookmark:(id)sender
+{
+    ScintillaView *e = [self editor];
+    if (!e) return;
+
+    long pos  = [e getGeneralProperty:SCI_GETCURRENTPOS];
+    long line = [e getGeneralProperty:SCI_LINEFROMPOSITION parameter:pos];
+    long mask = [e message:SCI_MARKERGET wParam:(uptr_t)line];
+
+    if (mask & (1L << MARK_BOOKMARK))
+        [e message:SCI_MARKERDELETE wParam:(uptr_t)line lParam:MARK_BOOKMARK];
+    else
+        [e message:SCI_MARKERADD wParam:(uptr_t)line lParam:MARK_BOOKMARK];
+
+    [self flashStatus:((mask & (1L << MARK_BOOKMARK)) ? @"已移除書籤" : @"已加入書籤")];
+}
+
+- (void)gotoMarker:(int)marker backwards:(BOOL)backwards
+{
+    ScintillaView *e = [self editor];
+    if (!e) return;
+
+    long cur  = [e getGeneralProperty:SCI_LINEFROMPOSITION
+                            parameter:[e getGeneralProperty:SCI_GETCURRENTPOS]];
+    long from = backwards ? cur : (cur + 1);
+    long line = [self lineOfMarker:marker from:from backwards:backwards];
+
+    if (line < 0) { NSBeep(); [self flashStatus:@"沒有書籤"]; return; }
+
+    [e message:SCI_GOTOLINE wParam:(uptr_t)line];
+    [e message:SCI_SCROLLCARET];
+    [_window makeFirstResponder:e];
+}
+
+- (void)nextBookmark:(id)sender { [self gotoMarker:MARK_BOOKMARK backwards:NO]; }
+- (void)prevBookmark:(id)sender { [self gotoMarker:MARK_BOOKMARK backwards:YES]; }
+
+- (void)markAllMatches:(id)sender
+{
+    ScintillaView *e = [self editor];
+    if (!e) return;
+
+    if (!_findPanel) { NSBeep(); return; }
+    NSString *needle = [_findPanel.findField stringValue];
+    if (!needle.length) { NSBeep(); [self flashStatus:@"請先在尋找面板輸入文字"]; return; }
+
+    FindOptions o = [self fpOptions];
+    long len = [e getGeneralProperty:SCI_GETLENGTH];
+    long pos = 0, l = 0, lines = 0, lastLine = -1;
+    double t0 = now_ms();
+
+    [e message:SCI_MARKERDELETEALL wParam:MARK_MATCH];
+    [e message:SCI_BEGINUNDOACTION];
+
+    while (pos <= len)
+    {
+        long p = sc_find(e, needle, o, pos, len, &l);
+        if (p < 0) break;
+
+        long line = [e getGeneralProperty:SCI_LINEFROMPOSITION parameter:p];
+        if (line != lastLine)
+        {
+            [e message:SCI_MARKERADD wParam:(uptr_t)line lParam:MARK_MATCH];
+            lastLine = line;
+            lines++;
+        }
+
+        pos = p + (l > 0 ? l : 1);
+        if (lines >= 5000 || now_ms() - t0 > 500) break;
+    }
+
+    [e message:SCI_ENDUNDOACTION];
+    [self flashStatus:[NSString stringWithFormat:@"已標記 %ld 行", lines]];
+    [_findPanel setStatus:[NSString stringWithFormat:@"已標記 %ld 行", lines] error:(lines == 0)];
+}
+
+- (void)clearMarks:(id)sender
+{
+    ScintillaView *e = [self editor];
+    if (!e) return;
+    [e message:SCI_MARKERDELETEALL wParam:MARK_MATCH];
+    [self flashStatus:@"已清除標記"];
 }
 
 //--------------------------------------------------------------------------------------------------
