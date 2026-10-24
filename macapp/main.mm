@@ -1278,6 +1278,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     BOOL            _showWS;
     BOOL            _showEOL;
     NSMenu         *_themeMenu;
+    NSMutableArray *_pendingOpen;
     id              _fifJob;
     NSUInteger      _fifGen;
     BOOL            _fifRunning;
@@ -1325,6 +1326,10 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         for (NSString *p in _openPaths)
             [self openPath:[p stringByStandardizingPath]];
     }
+    else if (_pendingOpen.count)
+    {
+        for (NSString *p in _pendingOpen) [self openPath:p];
+    }
     else if (!_uiCheck && !_editCheck)
     {
         [self restoreSession];
@@ -1348,6 +1353,20 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         [self performSelector:@selector(doSnapshot) withObject:nil afterDelay:1.0];
     else if (_bench)
         [self performSelector:@selector(doBenchAndQuit) withObject:nil afterDelay:2.5];
+}
+
+- (void)application:(NSApplication *)app openFiles:(NSArray<NSString *> *)filenames
+{
+    for (NSString *p in filenames)
+    {
+        if (_docs) [self openPath:p];
+        else
+        {
+            if (!_pendingOpen) _pendingOpen = [NSMutableArray array];
+            [_pendingOpen addObject:p];
+        }
+    }
+    [app replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)s { return YES; }

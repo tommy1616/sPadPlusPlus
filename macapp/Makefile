@@ -65,7 +65,7 @@ $(BUILD)/uch_%.o: $(UCH)/%.cpp | $(BUILD)
 $(BUILD)/main.o: main.mm | $(BUILD)
 	@$(CXX) $(CXXFLAGS) -x objective-c++ $(OBJCFLAGS) -c $< -o $@
 
-$(BIN): $(OBJS) $(LEXILLA_A) AppIcon.icns Assets.car $(wildcard Themes/*.xml)
+$(BIN): $(OBJS) $(LEXILLA_A) AppIcon.icns Assets.car $(wildcard Themes/*.xml) Info.plist
 	@mkdir -p $(BUNDLE)/Contents/MacOS
 	@mkdir -p $(BUNDLE)/Contents/Resources
 	@cp Info.plist $(BUNDLE)/Contents/Info.plist
