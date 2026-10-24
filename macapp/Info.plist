@@ -37,7 +37,25 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Text Document</string>
+			<string>文字文件</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.plain-text</string>
+				<string>public.text</string>
+				<string>public.source-code</string>
+				<string>public.html</string>
+				<string>public.json</string>
+				<string>public.xml</string>
+				<string>net.daringfireball.markdown</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>任何檔案</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -45,13 +63,6 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>public.data</string>
-				<string>public.text</string>
-				<string>public.plain-text</string>
-				<string>public.source-code</string>
-				<string>public.html</string>
-				<string>public.json</string>
-				<string>public.xml</string>
-				<string>net.daringfireball.markdown</string>
 			</array>
 		</dict>
 	</array>

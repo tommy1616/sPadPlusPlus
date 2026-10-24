@@ -127,6 +127,33 @@ Notepad++ 的 Win32 層負責的東西——訊息迴圈、對話框、docking�
 
 ---
 
+## 設成預設的文字開啟程式
+
+App 已經把「文字類」宣告成 `LSHandlerRank = Default`（`public.data` 保持 `Alternate`，
+所以不會搶走二進位檔），接下來只要讓系統記住就行。
+
+**方法一：Finder（圖形介面）**
+
+1. 對著任一個 `.txt` 按右鍵 → **取得資訊**
+2. **打開方式** → 選 `sPad++` → 按 **全部更改…**
+
+**方法二：命令列**
+
+```bash
+# 需要先裝 duti： brew install duti
+duti -s com.tommy1616.spad public.plain-text all
+duti -s com.tommy1616.spad net.daringfireball.markdown all
+```
+
+沒有 `duti` 的話，`scripts/set-default-app.m` 是一個 20 行的替代工具：
+
+```bash
+clang -framework Cocoa -framework UniformTypeIdentifiers -o setdef scripts/set-default-app.m
+./setdef /Applications/sPad++.app public.plain-text
+```
+
+> 換掉 App 路徑（搬動、改名）後要重設一次；建議把 App 放到 `/Applications`。
+
 ## 授權
 
 **GPL-3.0-or-later**，完整條文見 [LICENSE](LICENSE)，第三方元件見 [NOTICE](NOTICE)。
