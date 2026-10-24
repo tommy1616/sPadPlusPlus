@@ -34,6 +34,14 @@
 - 支援 C++11 正規表示式（`SCFIND_CXX11REGEX`）、全字拼寫、大小寫、循環搜尋
 - 檔案中尋找：跑在背景佇列、可中途取消、結果表格點兩下直接跳到該行
 
+### 介面語系
+
+- 預設 **繁體中文（台灣）**，內建英文（`en`）
+- 所有介面字串走 `NSLocalizedString`；字串表的 key 就是繁中原文，
+  所以缺翻譯時會自動回退成中文
+- 翻譯表由 `scripts/gen_strings.py` 產生（`macapp/Resources/*.lproj/Localizable.strings`），
+  新增語言只要在腳本裡加一個 dict
+
 ### 主題
 
 - **6 套內建主題**（我們自己設計，非取自 Notepad++）：

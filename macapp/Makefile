@@ -65,13 +65,16 @@ $(BUILD)/uch_%.o: $(UCH)/%.cpp | $(BUILD)
 $(BUILD)/main.o: main.mm | $(BUILD)
 	@$(CXX) $(CXXFLAGS) -x objective-c++ $(OBJCFLAGS) -c $< -o $@
 
-$(BIN): $(OBJS) $(LEXILLA_A) AppIcon.icns Assets.car $(wildcard Themes/*.xml) Info.plist
+$(BIN): $(OBJS) $(LEXILLA_A) AppIcon.icns Assets.car $(wildcard Themes/*.xml) \
+        $(wildcard Resources/*.lproj/Localizable.strings) Info.plist
 	@mkdir -p $(BUNDLE)/Contents/MacOS
 	@mkdir -p $(BUNDLE)/Contents/Resources
 	@cp Info.plist $(BUNDLE)/Contents/Info.plist
 	@cp AppIcon.icns $(BUNDLE)/Contents/Resources/AppIcon.icns
 	@mkdir -p $(BUNDLE)/Contents/Resources/Themes
 	@cp Themes/*.xml $(BUNDLE)/Contents/Resources/Themes/
+	@mkdir -p $(BUNDLE)/Contents/Resources
+	@cp -R Resources/*.lproj $(BUNDLE)/Contents/Resources/
 	@if [ -f Assets.car ]; then cp Assets.car $(BUNDLE)/Contents/Resources/Assets.car; fi
 	$(CXX) $(ARCH) -o $@ $(OBJS) $(LEXILLA_A) $(LDFLAGS)
 	@echo "完成：$(BIN)"

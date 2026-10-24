@@ -22,6 +22,8 @@
 
 #include "uchardet.h"
 
+#define T(s) NSLocalizedString((s), nil)
+
 //--------------------------------------------------------------------------------------------------
 #pragma mark - 小工具
 
@@ -259,7 +261,7 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 @end
 
 @implementation Doc
-- (NSString *)title { return self.path ? [[self.path lastPathComponent] copy] : @"未命名"; }
+- (NSString *)title { return self.path ? [[self.path lastPathComponent] copy] : T(@"未命名"); }
 - (BOOL)isDirty   { return self.metaDirty || [self.view getGeneralProperty:SCI_GETMODIFY] != 0; }
 @end
 
@@ -405,12 +407,23 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 - (void)mouseDown:(NSEvent *)e
 {
     NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+
+    // 「＋」按鈕：單擊就新增
+    CGFloat xEnd = -_scrollX;
+    for (Doc *d in self.docs) xEnd += [self widthForDoc:d];
+    if (NSPointInRect(p, NSMakeRect(xEnd + 2, 0, 34, self.bounds.size.height)))
+    {
+        [self.delegate tabBarDidRequestNewTab:self];
+        return;
+    }
+
     BOOL isClose = NO;
     NSInteger i = [self indexAtPoint:p closeArea:&isClose];
 
     if (i < 0)
     {
-        [self.delegate tabBarDidRequestNewTab:self];
+        // 空白處要雙擊才會新增分頁（避免誤觸）
+        if (e.clickCount == 2) [self.delegate tabBarDidRequestNewTab:self];
         return;
     }
     if (isClose)
@@ -565,7 +578,7 @@ static NSString *const kFPOriginY = @"FindPanelOriginY";
             _hasSavedOrigin = YES;
         }
         [self setReleasedWhenClosed:NO];
-        [self setTitle:@"尋找"];
+        [self setTitle:T(@"尋找")];
         [self setFloatingPanel:YES];
         [self setLevel:NSFloatingWindowLevel];
         [self setDelegate:(id<NSWindowDelegate>)self];
@@ -588,17 +601,17 @@ static NSString *const kFPOriginY = @"FindPanelOriginY";
     [cv addSubview:bg];
 
     // 模式切換
-    _seg = [NSSegmentedControl segmentedControlWithLabels:@[ @"尋找", @"取代", @"檔案中尋找" ]
+    _seg = [NSSegmentedControl segmentedControlWithLabels:@[ T(@"尋找"), T(@"取代"), T(@"檔案中尋找") ]
                                              trackingMode:NSSegmentSwitchTrackingSelectOne
                                                    target:self action:@selector(modeChanged:)];
     [_seg setSelectedSegment:0];
     [cv addSubview:_seg];
 
     // 尋找
-    _findLabel = fp_label(@"尋找：");
+    _findLabel = fp_label(T(@"尋找："));
     _findField = [[NSTextField alloc] init];
     [_findField setFont:[NSFont systemFontOfSize:13]];
-    [_findField setPlaceholderString:@"輸入要尋找的文字…"];
+    [_findField setPlaceholderString:T(@"輸入要尋找的文字…")];
     [_findField setDelegate:self];
     [_findField setTarget:self];
     [_findField setAction:@selector(enterPressed:)];
@@ -607,18 +620,18 @@ static NSString *const kFPOriginY = @"FindPanelOriginY";
     [cv addSubview:_findLabel]; [cv addSubview:_findField]; [cv addSubview:_histBtn];
 
     // 取代
-    _replaceLabel = fp_label(@"取代為：");
+    _replaceLabel = fp_label(T(@"取代為："));
     _replaceField = [[NSTextField alloc] init];
     [_replaceField setFont:[NSFont systemFontOfSize:13]];
-    [_replaceField setPlaceholderString:@"留空表示刪除"];
+    [_replaceField setPlaceholderString:T(@"留空表示刪除")];
     [_replaceField setDelegate:self];
     [cv addSubview:_replaceLabel]; [cv addSubview:_replaceField];
 
     // 選項
-    _caseCheck  = [NSButton checkboxWithTitle:@"大小寫須相符" target:self action:@selector(optionChanged:)];
-    _wordCheck  = [NSButton checkboxWithTitle:@"全字拼寫"     target:self action:@selector(optionChanged:)];
-    _regexCheck = [NSButton checkboxWithTitle:@"正規表示式"   target:self action:@selector(optionChanged:)];
-    _wrapCheck  = [NSButton checkboxWithTitle:@"循環"         target:self action:@selector(optionChanged:)];
+    _caseCheck  = [NSButton checkboxWithTitle:T(@"大小寫須相符") target:self action:@selector(optionChanged:)];
+    _wordCheck  = [NSButton checkboxWithTitle:T(@"全字拼寫")     target:self action:@selector(optionChanged:)];
+    _regexCheck = [NSButton checkboxWithTitle:T(@"正規表示式")   target:self action:@selector(optionChanged:)];
+    _wrapCheck  = [NSButton checkboxWithTitle:T(@"循環")         target:self action:@selector(optionChanged:)];
     [_wrapCheck setState:NSControlStateValueOn];
     for (NSButton *b in @[ _caseCheck, _wordCheck, _regexCheck, _wrapCheck ])
     {
@@ -638,12 +651,12 @@ static NSString *const kFPOriginY = @"FindPanelOriginY";
     [cv addSubview:_statusLabel];
 
     // 按鈕
-    _prevBtn = [NSButton buttonWithTitle:@"上一個" target:self action:@selector(prevClicked:)];
-    _nextBtn = [NSButton buttonWithTitle:@"下一個" target:self action:@selector(nextClicked:)];
-    _repBtn  = [NSButton buttonWithTitle:@"取代"   target:self action:@selector(replaceClicked:)];
-    _repAllBtn = [NSButton buttonWithTitle:@"全部取代" target:self action:@selector(replaceAllClicked:)];
-    _goBtn   = [NSButton buttonWithTitle:@"開始搜尋" target:self action:@selector(goClicked:)];
-    _closeBtn = [NSButton buttonWithTitle:@"關閉" target:self action:@selector(closeClicked:)];
+    _prevBtn = [NSButton buttonWithTitle:T(@"上一個") target:self action:@selector(prevClicked:)];
+    _nextBtn = [NSButton buttonWithTitle:T(@"下一個") target:self action:@selector(nextClicked:)];
+    _repBtn  = [NSButton buttonWithTitle:T(@"取代")   target:self action:@selector(replaceClicked:)];
+    _repAllBtn = [NSButton buttonWithTitle:T(@"全部取代") target:self action:@selector(replaceAllClicked:)];
+    _goBtn   = [NSButton buttonWithTitle:T(@"開始搜尋") target:self action:@selector(goClicked:)];
+    _closeBtn = [NSButton buttonWithTitle:T(@"關閉") target:self action:@selector(closeClicked:)];
     for (NSButton *b in @[ _prevBtn, _nextBtn, _repBtn, _repAllBtn, _goBtn, _closeBtn ])
     {
         [b setBezelStyle:NSBezelStyleRounded];
@@ -660,29 +673,29 @@ static NSString *const kFPOriginY = @"FindPanelOriginY";
     [_repBtn setKeyEquivalent:@"\r"];
 
     // 檔案中尋找：路徑 / 篩選
-    _dirLabel = fp_label(@"資料夾：");
+    _dirLabel = fp_label(T(@"資料夾："));
     _dirField = [[NSTextField alloc] init];
     [_dirField setFont:[NSFont systemFontOfSize:12]];
     [_dirField setPlaceholderString:@"~/Documents"];
-    _browseBtn = [NSButton buttonWithTitle:@"瀏覽…" target:self action:@selector(browseClicked:)];
+    _browseBtn = [NSButton buttonWithTitle:T(@"瀏覽…") target:self action:@selector(browseClicked:)];
     [_browseBtn setBezelStyle:NSBezelStyleRounded];
     [_browseBtn setFont:[NSFont systemFontOfSize:11]];
 
-    _filterLabel = fp_label(@"篩選：");
+    _filterLabel = fp_label(T(@"篩選："));
     _filterField = [[NSTextField alloc] init];
     [_filterField setFont:[NSFont systemFontOfSize:12]];
     [_filterField setStringValue:@"*.txt;*.md;*.c;*.cpp;*.h;*.mm;*.py;*.json"];
-    [_filterField setPlaceholderString:@"*.txt;*.md（分號分隔）"];
+    [_filterField setPlaceholderString:T(@"*.txt;*.md（分號分隔）")];
     [cv addSubview:_dirLabel]; [cv addSubview:_dirField]; [cv addSubview:_browseBtn];
     [cv addSubview:_filterLabel]; [cv addSubview:_filterField];
 
     // 結果表
     _table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 600, 200)];
     NSTableColumn *c1 = [[NSTableColumn alloc] initWithIdentifier:@"loc"];
-    [[c1 headerCell] setStringValue:@"位置"];
+    [[c1 headerCell] setStringValue:T(@"位置")];
     [c1 setWidth:250];
     NSTableColumn *c2 = [[NSTableColumn alloc] initWithIdentifier:@"text"];
-    [[c2 headerCell] setStringValue:@"內容"];
+    [[c2 headerCell] setStringValue:T(@"內容")];
     [c2 setWidth:370];
     [_table addTableColumn:c1];
     [_table addTableColumn:c2];
@@ -820,7 +833,7 @@ static NSString *const kFPOriginY = @"FindPanelOriginY";
     [_seg setSelectedSegment:mode];
     [self resizeToMode];
     [self layoutUI];
-    [self setTitle:(mode == FPModeFind ? @"尋找" : (mode == FPModeReplace ? @"取代" : @"檔案中尋找"))];
+    [self setTitle:(mode == FPModeFind ? T(@"尋找") : (mode == FPModeReplace ? T(@"取代") : T(@"檔案中尋找")))];
     [self focusFindField];
 }
 
@@ -1310,7 +1323,12 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         else if ([a isEqualToString:@"--hidecheck"])  _hideCheck = YES;
         else if ([a isEqualToString:@"--hidepanel"])  _hidePanel = YES;
         else if ([a isEqualToString:@"--editcheck"])  _editCheck = YES;
-        else if (![a hasPrefix:@"--"])               [_openPaths addObject:a];
+        else if ([a hasPrefix:@"-AppleLanguages"] || [a hasPrefix:@"-AppleLocale"])
+        {
+            i++;   // 這是 NSUserDefaults 的參數，後面那個值不是檔案
+        }
+        else if ([a hasPrefix:@"-"]) { /* 其他 -開頭的參數忽略 */ }
+        else [_openPaths addObject:a];
     }
 
     [self buildMenu];
@@ -1381,11 +1399,11 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         if (![d isDirty]) continue;
         [self selectDoc:d];
         NSAlert *a = [[NSAlert alloc] init];
-        [a setMessageText:[NSString stringWithFormat:@"「%@」有未儲存的變更。", [d title]]];
-        [a setInformativeText:@"關閉前要儲存嗎？"];
-        [a addButtonWithTitle:@"儲存"];
-        [a addButtonWithTitle:@"不儲存"];
-        [a addButtonWithTitle:@"取消"];
+        [a setMessageText:[NSString stringWithFormat:T(@"「%@」有未儲存的變更。"), [d title]]];
+        [a setInformativeText:T(@"關閉前要儲存嗎？")];
+        [a addButtonWithTitle:T(@"儲存")];
+        [a addButtonWithTitle:T(@"不儲存")];
+        [a addButtonWithTitle:T(@"取消")];
         NSModalResponse r = [a runModal];
         if (r == NSAlertThirdButtonReturn) return NSTerminateCancel;
         if (r == NSAlertFirstButtonReturn) [self saveDocument:nil];
@@ -1448,7 +1466,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     _statusLeft = [[NSTextField alloc] initWithFrame:NSMakeRect(12, 3, 700, 18)];
     [_statusLeft setEditable:NO]; [_statusLeft setBordered:NO]; [_statusLeft setDrawsBackground:NO];
     [_statusLeft setFont:[NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular]];
-    [_statusLeft setStringValue:@"就緒"];
+    [_statusLeft setStringValue:T(@"就緒")];
     [_statusLeft setAutoresizingMask:NSViewWidthSizable];
     [_statusBar addSubview:_statusLeft];
 
@@ -1472,100 +1490,100 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     [bar addItem:appItem];
     NSMenu *appMenu = [[NSMenu alloc] init];
     [appItem setSubmenu:appMenu];
-    [appMenu addItemWithTitle:@"About sPad++" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
+    [appMenu addItemWithTitle:T(@"關於 sPad++") action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
     [appMenu addItem:[NSMenuItem separatorItem]];
-    [appMenu addItemWithTitle:@"Hide sPad++" action:@selector(hide:) keyEquivalent:@"h"];
+    [appMenu addItemWithTitle:T(@"隱藏 sPad++") action:@selector(hide:) keyEquivalent:@"h"];
     [appMenu addItem:[NSMenuItem separatorItem]];
-    [appMenu addItemWithTitle:@"Quit sPad++" action:@selector(terminate:) keyEquivalent:@"q"];
+    [appMenu addItemWithTitle:T(@"結束 sPad++") action:@selector(terminate:) keyEquivalent:@"q"];
 
     // ---- File
     NSMenuItem *fileItem = [[NSMenuItem alloc] init];
     [bar addItem:fileItem];
-    NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+    NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:T(@"檔案")];
     [fileItem setSubmenu:fileMenu];
-    [fileMenu addItemWithTitle:@"New Tab" action:@selector(newDocument:) keyEquivalent:@"n"];
-    [fileMenu addItemWithTitle:@"Open…" action:@selector(openDocument:) keyEquivalent:@"o"];
+    [fileMenu addItemWithTitle:T(@"新增分頁") action:@selector(newDocument:) keyEquivalent:@"n"];
+    [fileMenu addItemWithTitle:T(@"開啟…") action:@selector(openDocument:) keyEquivalent:@"o"];
     [fileMenu addItem:[NSMenuItem separatorItem]];
-    [fileMenu addItemWithTitle:@"Close Tab" action:@selector(closeActiveTab:) keyEquivalent:@"w"];
+    [fileMenu addItemWithTitle:T(@"關閉分頁") action:@selector(closeActiveTab:) keyEquivalent:@"w"];
     [fileMenu addItem:[NSMenuItem separatorItem]];
-    [fileMenu addItemWithTitle:@"Save" action:@selector(saveDocument:) keyEquivalent:@"s"];
-    [fileMenu addItemWithTitle:@"Save As…" action:@selector(saveDocumentAs:) keyEquivalent:@"S"];
-    [fileMenu addItemWithTitle:@"Reload from Disk" action:@selector(reloadDocument:) keyEquivalent:@"r"];
+    [fileMenu addItemWithTitle:T(@"儲存") action:@selector(saveDocument:) keyEquivalent:@"s"];
+    [fileMenu addItemWithTitle:T(@"另存新檔…") action:@selector(saveDocumentAs:) keyEquivalent:@"S"];
+    [fileMenu addItemWithTitle:T(@"從磁碟重新載入") action:@selector(reloadDocument:) keyEquivalent:@"r"];
     [fileMenu addItem:[NSMenuItem separatorItem]];
-    [fileMenu addItemWithTitle:@"Run Load Benchmark…" action:@selector(runBenchmark:) keyEquivalent:@"b"];
+    [fileMenu addItemWithTitle:T(@"執行載入效能測試…") action:@selector(runBenchmark:) keyEquivalent:@"b"];
 
     // ---- Edit
     NSMenuItem *editItem = [[NSMenuItem alloc] init];
     [bar addItem:editItem];
-    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:T(@"編輯")];
     [editItem setSubmenu:editMenu];
-    [editMenu addItemWithTitle:@"Undo" action:@selector(undo:) keyEquivalent:@"z"];
-    [editMenu addItemWithTitle:@"Redo" action:@selector(redo:) keyEquivalent:@"Z"];
+    [editMenu addItemWithTitle:T(@"復原") action:@selector(undo:) keyEquivalent:@"z"];
+    [editMenu addItemWithTitle:T(@"重做") action:@selector(redo:) keyEquivalent:@"Z"];
     [editMenu addItem:[NSMenuItem separatorItem]];
-    [editMenu addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
-    [editMenu addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
-    [editMenu addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
-    [editMenu addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+    [editMenu addItemWithTitle:T(@"剪下") action:@selector(cut:) keyEquivalent:@"x"];
+    [editMenu addItemWithTitle:T(@"複製") action:@selector(copy:) keyEquivalent:@"c"];
+    [editMenu addItemWithTitle:T(@"貼上") action:@selector(paste:) keyEquivalent:@"v"];
+    [editMenu addItemWithTitle:T(@"全選") action:@selector(selectAll:) keyEquivalent:@"a"];
     [editMenu addItem:[NSMenuItem separatorItem]];
     NSMenuItem *mi;
-    mi = [editMenu addItemWithTitle:@"尋找…" action:@selector(menuFind:) keyEquivalent:@"f"];
+    mi = [editMenu addItemWithTitle:T(@"尋找…") action:@selector(menuFind:) keyEquivalent:@"f"];
     [mi setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
-    mi = [editMenu addItemWithTitle:@"取代…" action:@selector(menuReplace:) keyEquivalent:@"f"];
+    mi = [editMenu addItemWithTitle:T(@"取代…") action:@selector(menuReplace:) keyEquivalent:@"f"];
     [mi setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagOption];
-    mi = [editMenu addItemWithTitle:@"檔案中尋找…" action:@selector(menuFindInFiles:) keyEquivalent:@"f"];
+    mi = [editMenu addItemWithTitle:T(@"檔案中尋找…") action:@selector(menuFindInFiles:) keyEquivalent:@"f"];
     [mi setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
     [editMenu addItem:[NSMenuItem separatorItem]];
-    [editMenu addItemWithTitle:@"找下一個" action:@selector(menuFindNext:) keyEquivalent:@"g"];
-    mi = [editMenu addItemWithTitle:@"找上一個" action:@selector(menuFindPrev:) keyEquivalent:@"g"];
+    [editMenu addItemWithTitle:T(@"找下一個") action:@selector(menuFindNext:) keyEquivalent:@"g"];
+    mi = [editMenu addItemWithTitle:T(@"找上一個") action:@selector(menuFindPrev:) keyEquivalent:@"g"];
     [mi setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
     [editMenu addItem:[NSMenuItem separatorItem]];
     [editMenu addItem:[NSMenuItem separatorItem]];
-    [editMenu addItemWithTitle:@"選取下一個相同" action:@selector(selectNextOccurrence:) keyEquivalent:@"d"];
-    NSMenuItem *allOcc = [editMenu addItemWithTitle:@"選取全部相同" action:@selector(selectAllOccurrences:) keyEquivalent:@"l"];
+    [editMenu addItemWithTitle:T(@"選取下一個相同") action:@selector(selectNextOccurrence:) keyEquivalent:@"d"];
+    NSMenuItem *allOcc = [editMenu addItemWithTitle:T(@"選取全部相同") action:@selector(selectAllOccurrences:) keyEquivalent:@"l"];
     [allOcc setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
-    NSMenuItem *acItem = [editMenu addItemWithTitle:@"文字自動完成" action:@selector(showAutoComplete:) keyEquivalent:@"\r"];
+    NSMenuItem *acItem = [editMenu addItemWithTitle:T(@"文字自動完成") action:@selector(showAutoComplete:) keyEquivalent:@"\r"];
     [acItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
     [editMenu addItem:[NSMenuItem separatorItem]];
 
     NSString *f2 = [NSString stringWithFormat:@"%C", (unichar)NSF2FunctionKey];
-    NSMenuItem *bmItem = [editMenu addItemWithTitle:@"切換書籤" action:@selector(toggleBookmark:) keyEquivalent:f2];
+    NSMenuItem *bmItem = [editMenu addItemWithTitle:T(@"切換書籤") action:@selector(toggleBookmark:) keyEquivalent:f2];
     [bmItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
-    NSMenuItem *bnItem = [editMenu addItemWithTitle:@"下一個書籤" action:@selector(nextBookmark:) keyEquivalent:f2];
+    NSMenuItem *bnItem = [editMenu addItemWithTitle:T(@"下一個書籤") action:@selector(nextBookmark:) keyEquivalent:f2];
     [bnItem setKeyEquivalentModifierMask:0];
-    NSMenuItem *bpItem = [editMenu addItemWithTitle:@"上一個書籤" action:@selector(prevBookmark:) keyEquivalent:f2];
+    NSMenuItem *bpItem = [editMenu addItemWithTitle:T(@"上一個書籤") action:@selector(prevBookmark:) keyEquivalent:f2];
     [bpItem setKeyEquivalentModifierMask:NSEventModifierFlagShift];
 
     [editMenu addItem:[NSMenuItem separatorItem]];
-    NSMenuItem *markItem = [editMenu addItemWithTitle:@"標記全部符合" action:@selector(markAllMatches:) keyEquivalent:@"m"];
+    NSMenuItem *markItem = [editMenu addItemWithTitle:T(@"標記全部符合") action:@selector(markAllMatches:) keyEquivalent:@"m"];
     [markItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
-    NSMenuItem *clearItem = [editMenu addItemWithTitle:@"清除所有標記" action:@selector(clearMarks:) keyEquivalent:@"k"];
+    NSMenuItem *clearItem = [editMenu addItemWithTitle:T(@"清除所有標記") action:@selector(clearMarks:) keyEquivalent:@"k"];
     [clearItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
 
     [editMenu addItem:[NSMenuItem separatorItem]];
-    [editMenu addItemWithTitle:@"Go to Line…" action:@selector(goToLine:) keyEquivalent:@"l"];
+    [editMenu addItemWithTitle:T(@"跳至行…") action:@selector(goToLine:) keyEquivalent:@"l"];
 
     // ---- View
     NSMenuItem *viewItem = [[NSMenuItem alloc] init];
     [bar addItem:viewItem];
-    NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+    NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:T(@"顯示")];
     [viewItem setSubmenu:viewMenu];
-    NSMenuItem *themeItem = [[NSMenuItem alloc] initWithTitle:@"主題" action:nil keyEquivalent:@""];
-    _themeMenu = [[NSMenu alloc] initWithTitle:@"主題"];
+    NSMenuItem *themeItem = [[NSMenuItem alloc] initWithTitle:T(@"主題") action:nil keyEquivalent:@""];
+    _themeMenu = [[NSMenu alloc] initWithTitle:T(@"主題")];
     [themeItem setSubmenu:_themeMenu];
     [viewMenu addItem:themeItem];
     [self rebuildThemeMenu];
     [viewMenu addItemWithTitle:@"Toggle Line Numbers" action:@selector(toggleLineNumbers:) keyEquivalent:@""];
     [viewMenu addItemWithTitle:@"Toggle Word Wrap" action:@selector(toggleWrap:) keyEquivalent:@""];
 
-    [viewMenu addItemWithTitle:@"顯示空白字元" action:@selector(toggleWhitespace:) keyEquivalent:@""];
-    [viewMenu addItemWithTitle:@"顯示換行符號" action:@selector(toggleEOL:) keyEquivalent:@""];
+    [viewMenu addItemWithTitle:T(@"顯示空白字元") action:@selector(toggleWhitespace:) keyEquivalent:@""];
+    [viewMenu addItemWithTitle:T(@"顯示換行符號") action:@selector(toggleEOL:) keyEquivalent:@""];
     [viewMenu addItem:[NSMenuItem separatorItem]];
-    [viewMenu addItemWithTitle:@"放大" action:@selector(zoomIn:) keyEquivalent:@"="];
-    [viewMenu addItemWithTitle:@"縮小" action:@selector(zoomOut:) keyEquivalent:@"-"];
-    [viewMenu addItemWithTitle:@"實際大小" action:@selector(zoomReset:) keyEquivalent:@"0"];
+    [viewMenu addItemWithTitle:T(@"放大") action:@selector(zoomIn:) keyEquivalent:@"="];
+    [viewMenu addItemWithTitle:T(@"縮小") action:@selector(zoomOut:) keyEquivalent:@"-"];
+    [viewMenu addItemWithTitle:T(@"實際大小") action:@selector(zoomReset:) keyEquivalent:@"0"];
 
-    NSMenuItem *eolItem = [[NSMenuItem alloc] initWithTitle:@"Line Endings" action:nil keyEquivalent:@""];
-    NSMenu *eolMenu = [[NSMenu alloc] initWithTitle:@"Line Endings"];
+    NSMenuItem *eolItem = [[NSMenuItem alloc] initWithTitle:T(@"換行格式") action:nil keyEquivalent:@""];
+    NSMenu *eolMenu = [[NSMenu alloc] initWithTitle:T(@"換行格式")];
     [eolItem setSubmenu:eolMenu];
     for (NSString *e in @[ @"LF", @"CRLF", @"CR" ])
         [eolMenu addItemWithTitle:e action:@selector(changeEOL:) keyEquivalent:@""];
@@ -1574,7 +1592,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     // ---- Encoding
     NSMenuItem *encItem = [[NSMenuItem alloc] init];
     [bar addItem:encItem];
-    NSMenu *encMenu = [[NSMenu alloc] initWithTitle:@"Encoding"];
+    NSMenu *encMenu = [[NSMenu alloc] initWithTitle:T(@"編碼")];
     [encItem setSubmenu:encMenu];
     for (NSString *e in common_encodings())
     {
@@ -1782,10 +1800,10 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     {
         [self selectDoc:d];
         NSAlert *a = [[NSAlert alloc] init];
-        [a setMessageText:[NSString stringWithFormat:@"「%@」有未儲存的變更。", [d title]]];
-        [a addButtonWithTitle:@"儲存"];
-        [a addButtonWithTitle:@"不儲存"];
-        [a addButtonWithTitle:@"取消"];
+        [a setMessageText:[NSString stringWithFormat:T(@"「%@」有未儲存的變更。"), [d title]]];
+        [a addButtonWithTitle:T(@"儲存")];
+        [a addButtonWithTitle:T(@"不儲存")];
+        [a addButtonWithTitle:T(@"取消")];
         NSModalResponse r = [a runModal];
         if (r == NSAlertThirdButtonReturn) return;
         if (r == NSAlertFirstButtonReturn) [self saveDocument:nil];
@@ -1835,7 +1853,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     if (!raw)
     {
         NSAlert *a = [[NSAlert alloc] init];
-        [a setMessageText:[NSString stringWithFormat:@"無法開啟 %@", path]];
+        [a setMessageText:[NSString stringWithFormat:T(@"無法開啟 %@"), path]];
         [a runModal];
         return NO;
     }
@@ -1916,7 +1934,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         if (!nsEnc || !s)
         {
             NSAlert *a = [[NSAlert alloc] init];
-            [a setMessageText:[NSString stringWithFormat:@"不支援 %@ 編碼", d.encoding]];
+            [a setMessageText:[NSString stringWithFormat:T(@"不支援 %@ 編碼"), d.encoding]];
             [a runModal];
             return NO;
         }
@@ -1927,11 +1945,11 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         if (!out)
         {
             NSAlert *a = [[NSAlert alloc] init];
-            [a setMessageText:[NSString stringWithFormat:@"有字元無法用 %@ 編碼表示", d.encoding]];
-            [a setInformativeText:@"「以 UTF-8 儲存」可完整保留內容；「用 ? 取代」會永久破壞那些字元。"];
-            [a addButtonWithTitle:@"取消"];
-            [a addButtonWithTitle:@"以 UTF-8 儲存"];
-            [a addButtonWithTitle:@"用 ? 取代並儲存"];
+            [a setMessageText:[NSString stringWithFormat:T(@"有字元無法用 %@ 編碼表示"), d.encoding]];
+            [a setInformativeText:T(@"「以 UTF-8 儲存」可完整保留內容；「用 ? 取代」會永久破壞那些字元。")];
+            [a addButtonWithTitle:T(@"取消")];
+            [a addButtonWithTitle:T(@"以 UTF-8 儲存")];
+            [a addButtonWithTitle:T(@"用 ? 取代並儲存")];
 
             NSModalResponse r = [a runModal];
             if (r == NSAlertFirstButtonReturn)  return NO;          // 取消
@@ -1958,7 +1976,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     if (!ok)
     {
         NSAlert *a = [[NSAlert alloc] init];
-        [a setMessageText:@"儲存失敗"];
+        [a setMessageText:T(@"儲存失敗")];
         [a setInformativeText:[err localizedDescription] ?: @""];
         [a runModal];
         return NO;
@@ -2148,7 +2166,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
 - (void)updateStatus
 {
     ScintillaView *e = [self editor];
-    if (!e) { [_statusLeft setStringValue:@"就緒"]; [_statusRight setStringValue:@""]; return; }
+    if (!e) { [_statusLeft setStringValue:T(@"就緒")]; [_statusRight setStringValue:@""]; return; }
     Doc *d = _docs[_active];
 
     long pos  = [e getGeneralProperty:SCI_GETCURRENTPOS];
@@ -2161,9 +2179,9 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     NSString *enc = d.encoding;
     if (d.hasBOM) enc = [enc stringByAppendingString:@" BOM"];
 
-    [_statusLeft setStringValue:[NSString stringWithFormat:@"%@   ·   %ld 行   ·   %@",
+    [_statusLeft setStringValue:[NSString stringWithFormat:T(@"%@   ·   %ld 行   ·   %@"),
                                  [d title], lines, human_bytes(bytes)]];
-    [_statusRight setStringValue:[NSString stringWithFormat:@"%@   ·   %@   ·   行 %ld，欄 %ld   ·   %ld 字元選取   ·   載入 %.0f ms",
+    [_statusRight setStringValue:[NSString stringWithFormat:T(@"%@   ·   %@   ·   行 %ld，欄 %ld   ·   %ld 字元選取   ·   載入 %.0f ms"),
                                 enc, d.eol, line + 1, col + 1, selLen, _tLoad]];
     [_tabBar setNeedsDisplay:YES];
 }
@@ -2846,15 +2864,15 @@ static BOOL is_word_char(unichar c)
     {
         if (o.regex && sc_find(e, needle, o, 0, 0, NULL) < 0 && needle.length)
             invalid = NO;   // 交由 macOS regex 錯誤提示（略）
-        [_findPanel setStatus:(o.regex ? @"沒有符合的結果（或表示式無效）" : @"沒有符合的結果") error:YES];
+        [_findPanel setStatus:(o.regex ? T(@"沒有符合的結果（或表示式無效）") : T(@"沒有符合的結果")) error:YES];
         return;
     }
 
     long cur = [e getGeneralProperty:SCI_GETCURRENTPOS];
     NSInteger idx = [self indexOfFirstMatchAtOrAfter:cur];
-    NSString *txt = [NSString stringWithFormat:@"%ld 筆符合%@　·　目前第 %ld 筆",
+    NSString *txt = [NSString stringWithFormat:T(@"%ld 筆符合%@　·　目前第 %ld 筆"),
                      (long)_findRanges.count,
-                     truncated ? @"（已達上限，僅顯示前 4000 筆）" : @"",
+                     truncated ? T(@"（已達上限，僅顯示前 4000 筆）") : @"",
                      (long)(idx >= (NSInteger)_findRanges.count ? 1 : idx + 1)];
     [_findPanel setStatus:txt error:NO];
     (void)invalid;
@@ -2908,7 +2926,7 @@ static BOOL is_word_char(unichar c)
         pos = best; l = bestLen;
     }
 
-    if (pos < 0) { NSBeep(); [_findPanel setStatus:@"找不到" error:YES]; return; }
+    if (pos < 0) { NSBeep(); [_findPanel setStatus:T(@"找不到") error:YES]; return; }
 
     [e message:SCI_SETSEL wParam:(uptr_t)pos lParam:(sptr_t)(pos + l)];
     [e message:SCI_SCROLLCARET];
@@ -2918,7 +2936,7 @@ static BOOL is_word_char(unichar c)
     if (_findRanges.count)
     {
         NSInteger idx = [self indexOfFirstMatchAtOrAfter:pos];
-        [_findPanel setStatus:[NSString stringWithFormat:@"%ld 筆符合　·　目前第 %ld 筆",
+        [_findPanel setStatus:[NSString stringWithFormat:T(@"%ld 筆符合　·　目前第 %ld 筆"),
                                (long)_findRanges.count,
                                (long)(idx >= (NSInteger)_findRanges.count ? _findRanges.count : idx + 1)]
                         error:NO];
@@ -3004,7 +3022,7 @@ static BOOL is_word_char(unichar c)
     }
     [e message:SCI_ENDUNDOACTION];
 
-    [_findPanel setStatus:[NSString stringWithFormat:@"已取代 %ld 筆（%.0f ms）", count, now_ms() - t0]
+    [_findPanel setStatus:[NSString stringWithFormat:T(@"已取代 %ld 筆（%.0f ms）"), count, now_ms() - t0]
                     error:(count == 0)];
     [self fpOptionsChanged];
 }
@@ -3020,8 +3038,8 @@ static BOOL is_word_char(unichar c)
     _fifRunning = NO;
     if (_findPanel)
     {
-        [_findPanel.goBtn setTitle:@"開始搜尋"];
-        [_findPanel setStatus:@"已停止" error:NO];
+        [_findPanel.goBtn setTitle:T(@"開始搜尋")];
+        [_findPanel setStatus:T(@"已停止") error:NO];
     }
 }
 
@@ -3034,14 +3052,14 @@ static BOOL is_word_char(unichar c)
     NSString *dir    = [_findPanel.dirField stringValue];
     NSString *filter = [_findPanel.filterField stringValue];
 
-    if (!needle.length) { [_findPanel setStatus:@"請先輸入要尋找的文字" error:YES]; return; }
+    if (!needle.length) { [_findPanel setStatus:T(@"請先輸入要尋找的文字") error:YES]; return; }
     if (!dir.length) dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
     dir = [dir stringByExpandingTildeInPath];
 
     BOOL isDir = NO;
     if (![[NSFileManager defaultManager] fileExistsAtPath:dir isDirectory:&isDir] || !isDir)
     {
-        [_findPanel setStatus:@"資料夾不存在" error:YES];
+        [_findPanel setStatus:T(@"資料夾不存在") error:YES];
         return;
     }
 
@@ -3055,7 +3073,7 @@ static BOOL is_word_char(unichar c)
                                                          error:&err];
         if (!re)
         {
-            [_findPanel setStatus:[NSString stringWithFormat:@"正規表示式錯誤：%@",
+            [_findPanel setStatus:[NSString stringWithFormat:T(@"正規表示式錯誤：%@"),
                                    [err localizedDescription] ?: @""] error:YES];
             return;
         }
@@ -3067,9 +3085,9 @@ static BOOL is_word_char(unichar c)
     _fifJob = job;
     NSUInteger gen = ++_fifGen;
     _fifRunning = YES;
-    [_findPanel.goBtn setTitle:@"停止"];
+    [_findPanel.goBtn setTitle:T(@"停止")];
     [_findPanel setResultItems:@[]];
-    [_findPanel setStatus:@"搜尋中…" error:NO];
+    [_findPanel setStatus:T(@"搜尋中…") error:NO];
 
     NSString *needleC = [needle copy];
     NSString *dirC    = [dir copy];
@@ -3166,7 +3184,7 @@ static BOOL is_word_char(unichar c)
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (gen != self->_fifGen) return;
                     [self->_findPanel setResultItems:snap];
-                    [self->_findPanel setStatus:[NSString stringWithFormat:@"搜尋中…  已掃描 %lu 檔，%lu 筆",
+                    [self->_findPanel setStatus:[NSString stringWithFormat:T(@"搜尋中…  已掃描 %lu 檔，%lu 筆"),
                                                  (unsigned long)sc, (unsigned long)snap.count] error:NO];
                 });
             }
@@ -3182,12 +3200,12 @@ static BOOL is_word_char(unichar c)
             if (gen != self->_fifGen) return;
             self->_fifRunning = NO;
             self->_fifJob = nil;
-            [self->_findPanel.goBtn setTitle:@"開始搜尋"];
+            [self->_findPanel.goBtn setTitle:T(@"開始搜尋")];
             [self->_findPanel setResultItems:final];
-            [self->_findPanel setStatus:[NSString stringWithFormat:@"%@ 在 %lu 個檔案中找到 %lu 筆（%.0f ms）%@",
-                                        wasCancelled ? @"已停止 —" : @"",
+            [self->_findPanel setStatus:[NSString stringWithFormat:T(@"%@ 在 %lu 個檔案中找到 %lu 筆（%.0f ms）%@"),
+                                        wasCancelled ? T(@"已停止 —") : @"",
                                         (unsigned long)files, (unsigned long)final.count, elapsed,
-                                        cut ? @"，已達上限" : @""]
+                                        cut ? T(@"，已達上限") : @""]
                                    error:(final.count == 0)];
         });
     });
@@ -3423,8 +3441,8 @@ static BOOL is_word_char(unichar c)
         [_themeMenu addItem:it];
     }
     [_themeMenu addItem:[NSMenuItem separatorItem]];
-    [_themeMenu addItemWithTitle:@"重新載入主題" action:@selector(reloadThemes:) keyEquivalent:@""];
-    [_themeMenu addItemWithTitle:@"開啟主題資料夾…" action:@selector(openThemeFolder:) keyEquivalent:@""];
+    [_themeMenu addItemWithTitle:T(@"重新載入主題") action:@selector(reloadThemes:) keyEquivalent:@""];
+    [_themeMenu addItemWithTitle:T(@"開啟主題資料夾…") action:@selector(openThemeFolder:) keyEquivalent:@""];
 }
 
 - (void)selectTheme:(NSMenuItem *)item
@@ -3439,7 +3457,7 @@ static BOOL is_word_char(unichar c)
     [[ThemeManager shared] reload];
     [self rebuildThemeMenu];
     [self applyTheme:YES];
-    [self flashStatus:[NSString stringWithFormat:@"已載入 %lu 個主題",
+    [self flashStatus:[NSString stringWithFormat:T(@"已載入 %lu 個主題"),
                        (unsigned long)[ThemeManager shared].themes.count]];
 }
 
@@ -3509,7 +3527,7 @@ static BOOL is_word_char(unichar c)
     else
         [e message:SCI_MARKERADD wParam:(uptr_t)line lParam:MARK_BOOKMARK];
 
-    [self flashStatus:((mask & (1L << MARK_BOOKMARK)) ? @"已移除書籤" : @"已加入書籤")];
+    [self flashStatus:((mask & (1L << MARK_BOOKMARK)) ? T(@"已移除書籤") : T(@"已加入書籤"))];
 }
 
 - (void)gotoMarker:(int)marker backwards:(BOOL)backwards
@@ -3522,7 +3540,7 @@ static BOOL is_word_char(unichar c)
     long from = backwards ? cur : (cur + 1);
     long line = [self lineOfMarker:marker from:from backwards:backwards];
 
-    if (line < 0) { NSBeep(); [self flashStatus:@"沒有書籤"]; return; }
+    if (line < 0) { NSBeep(); [self flashStatus:T(@"沒有書籤")]; return; }
 
     [e message:SCI_GOTOLINE wParam:(uptr_t)line];
     [e message:SCI_SCROLLCARET];
@@ -3539,7 +3557,7 @@ static BOOL is_word_char(unichar c)
 
     if (!_findPanel) { NSBeep(); return; }
     NSString *needle = [_findPanel.findField stringValue];
-    if (!needle.length) { NSBeep(); [self flashStatus:@"請先在尋找面板輸入文字"]; return; }
+    if (!needle.length) { NSBeep(); [self flashStatus:T(@"請先在尋找面板輸入文字")]; return; }
 
     FindOptions o = [self fpOptions];
     long len = [e getGeneralProperty:SCI_GETLENGTH];
@@ -3567,8 +3585,8 @@ static BOOL is_word_char(unichar c)
     }
 
     [e message:SCI_ENDUNDOACTION];
-    [self flashStatus:[NSString stringWithFormat:@"已標記 %ld 行", lines]];
-    [_findPanel setStatus:[NSString stringWithFormat:@"已標記 %ld 行", lines] error:(lines == 0)];
+    [self flashStatus:[NSString stringWithFormat:T(@"已標記 %ld 行"), lines]];
+    [_findPanel setStatus:[NSString stringWithFormat:T(@"已標記 %ld 行"), lines] error:(lines == 0)];
 }
 
 - (void)clearMarks:(id)sender
@@ -3576,7 +3594,7 @@ static BOOL is_word_char(unichar c)
     ScintillaView *e = [self editor];
     if (!e) return;
     [e message:SCI_MARKERDELETEALL wParam:MARK_MATCH];
-    [self flashStatus:@"已清除標記"];
+    [self flashStatus:T(@"已清除標記")];
 }
 
 //--------------------------------------------------------------------------------------------------

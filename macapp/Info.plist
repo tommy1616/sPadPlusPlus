@@ -3,7 +3,14 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
+	<string>zh-Hant</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hant</string>
+		<string>en</string>
+	</array>
+	<key>LSMultipleInstancesProhibited</key>
+	<true/>
 	<key>CFBundleExecutable</key>
 	<string>sPad++</string>
 	<key>CFBundleIconFile</key>
