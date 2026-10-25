@@ -255,6 +255,9 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 @property (nonatomic)         long firstVisibleLine;
 @property (nonatomic)         BOOL metaDirty;      // 只改編碼/EOL、還沒改內容時用
 @property (nonatomic, copy)   NSString *lexerName;  // 目前使用中的 Lexilla lexer
+@property (nonatomic, strong) NSScrollView *previewScroll;
+@property (nonatomic, strong) NSTextView   *previewText;
+@property (nonatomic)         BOOL          previewing;
 
 - (NSString *)title;
 - (BOOL)isDirty;
@@ -1177,6 +1180,51 @@ static void npp_exception_handler(NSException *e)
 
 
 //--------------------------------------------------------------------------------------------------
+#pragma mark - 編輯器子類別（支援把檔案拖進來）
+
+static NSString *const kSpadOpenFilesNotification = @"SpadOpenFilesNotification";
+
+@interface SpadEditorView : ScintillaView
+@end
+
+@implementation SpadEditorView
+
+- (NSArray<NSURL *> *)spad_fileURLsFrom:(id<NSDraggingInfo>)sender
+{
+    NSPasteboard *pb = [sender draggingPasteboard];
+    NSArray<NSURL *> *urls = [pb readObjectsForClasses:@[ [NSURL class] ]
+                                               options:@{ NSPasteboardURLReadingFileURLsOnlyKey: @YES }];
+    return urls.count ? urls : nil;
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender
+{
+    if ([self spad_fileURLsFrom:sender]) return NSDragOperationCopy;
+    return [super draggingEntered:sender];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender
+{
+    if ([self spad_fileURLsFrom:sender]) return NSDragOperationCopy;
+    return [super draggingUpdated:sender];
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender
+{
+    NSArray<NSURL *> *urls = [self spad_fileURLsFrom:sender];
+    if (urls.count)
+    {
+        [[NSNotificationCenter defaultCenter] postNotificationName:kSpadOpenFilesNotification
+                                                            object:nil
+                                                          userInfo:@{ @"urls": urls }];
+        return YES;
+    }
+    return [super performDragOperation:sender];
+}
+
+@end
+
+//--------------------------------------------------------------------------------------------------
 #pragma mark - 主題（Notepad++ themes/*.xml 相容）
 
 static NSColor *theme_color(NSString *hex, NSColor *fallback)
@@ -1407,6 +1455,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     BOOL            _showWS;
     BOOL            _showEOL;
     NSMenu         *_themeMenu;
+    NSButton       *_previewButton;
     NSMutableArray *_pendingOpen;
     NSMutableArray *_viewPool;
     id              _fifJob;
@@ -1424,6 +1473,10 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
 {
     NSSetUncaughtExceptionHandler(npp_exception_handler);
     [[ThemeManager shared] reload];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(openDroppedFiles:)
+                                                 name:kSpadOpenFilesNotification
+                                               object:nil];
     npp_log(@"launch args=%@", [[[NSProcessInfo processInfo] arguments] componentsJoinedByString:@" "]);
     _docs = [NSMutableArray array];
     _openPaths = [NSMutableArray array];
@@ -1497,6 +1550,11 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         [self performSelector:@selector(doSnapshot) withObject:nil afterDelay:1.0];
     else if (_bench)
         [self performSelector:@selector(doBenchAndQuit) withObject:nil afterDelay:2.5];
+}
+
+- (void)openDroppedFiles:(NSNotification *)note
+{
+    for (NSURL *u in note.userInfo[@"urls"]) [self openPath:[u path]];
 }
 
 - (void)application:(NSApplication *)app openFiles:(NSArray<NSString *> *)filenames
@@ -1603,6 +1661,16 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     [_statusRight setStringValue:@""];
     [_statusRight setAutoresizingMask:NSViewMinXMargin];
     [_statusBar addSubview:_statusRight];
+
+    // 底部中央：原始碼 / 預覽 切換
+    _previewButton = [NSButton buttonWithTitle:T(@"預覽") target:self action:@selector(togglePreview:)];
+    [_previewButton setBezelStyle:NSBezelStyleRounded];
+    [_previewButton setControlSize:NSControlSizeSmall];
+    [_previewButton setFont:[NSFont systemFontOfSize:11]];
+    [_previewButton setFrame:NSMakeRect(frame.size.width / 2 - 34, 2, 68, 18)];
+    [_previewButton setAutoresizingMask:NSViewMinXMargin | NSViewMaxXMargin];
+    [_previewButton setHidden:YES];
+    [_statusBar addSubview:_previewButton];
 
     [self applyTheme:_dark];
 }
@@ -1876,7 +1944,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     }
     else
     {
-        e = [[ScintillaView alloc] initWithFrame:r];
+        e = [[SpadEditorView alloc] initWithFrame:r];
     }
 
     [e setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
@@ -1936,9 +2004,20 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     for (NSView *v in [_editorHost.subviews copy]) [v removeFromSuperview];
     if (!doc.view) doc.view = [self makeEditor];
     doc.view.delegate = self;
-    [doc.view setFrame:[_editorHost bounds]];
-    [_editorHost addSubview:doc.view];
-    [_window makeFirstResponder:doc.view];
+
+    if (doc.previewing && doc.previewScroll)
+    {
+        [doc.previewScroll setFrame:[_editorHost bounds]];
+        [_editorHost addSubview:doc.previewScroll];
+        [self renderPreviewForDoc:doc];
+        [_window makeFirstResponder:doc.previewText];
+    }
+    else
+    {
+        [doc.view setFrame:[_editorHost bounds]];
+        [_editorHost addSubview:doc.view];
+        [_window makeFirstResponder:doc.view];
+    }
 
     _active = idx;
     [_tabBar setDocs:_docs];
@@ -2468,6 +2547,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         _lastStatusRight = [right copy];
         [_statusRight setStringValue:right];
     }
+    [self updatePreviewButton];
 }
 
 - (void)notification:(SCNotification *)scn
@@ -2706,6 +2786,18 @@ static void hc_log(NSString *fmt, ...)
     }
     fprintf(stdout, "CLOSE churn ok, docs=%lu\n", (unsigned long)_docs.count); fflush(stdout);
 
+    // 預覽測試
+    {
+        [self selectDoc:_docs[0]];
+        fprintf(stdout, "PREVIEW canPreview=%d ext=%s\n",
+                (int)[self docCanPreview:_docs[0]],
+                [[[_docs[0].path pathExtension] lowercaseString] UTF8String]);
+        [self togglePreview:nil];
+        fprintf(stdout, "PREVIEW on=%d\n", (int)_docs[0].previewing);
+        saveWindowPNG(_window, @"/tmp/preview_ui.png");
+        fflush(stdout);
+    }
+
     // 行內重新命名（UI 路徑）
     {
         [self selectDoc:_docs[0]];
@@ -2720,7 +2812,7 @@ static void hc_log(NSString *fmt, ...)
         fprintf(stdout, "\nINLINE field=%s\n", tf ? "yes" : "no");
         if (tf)
         {
-            [tf setStringValue:@"inline_test"];
+            [tf setStringValue:[NSString stringWithFormat:@"inline_%d", (int)time(NULL)]];
             saveWindowPNG(_window, @"/tmp/rename_ui.png");
             [_tabBar control:nil textView:nil doCommandBySelector:@selector(insertNewline:)];
             fprintf(stdout, "INLINE after commit path=%s\n",
@@ -3845,6 +3937,264 @@ static BOOL is_word_char(unichar c)
     [e message:SCI_AUTOCSHOW wParam:0 lParam:(sptr_t)[list UTF8String]];
 }
 
+
+//--------------------------------------------------------------------------------------------------
+#pragma mark - 預覽渲染（Markdown / JSON）
+
+static NSFont *monoFont(CGFloat size)
+{
+    return [NSFont monospacedSystemFontOfSize:size weight:NSFontWeightRegular];
+}
+
+static void appendInline(NSMutableAttributedString *out, NSString *text,
+                         NSFont *baseFont, NSColor *fg, NSColor *codeColor, NSColor *linkColor)
+{
+    NSMutableString *buf = [NSMutableString string];
+    NSUInteger i = 0, n = text.length;
+
+    void (^flush)(void) = ^{
+        if (!buf.length) return;
+        [out appendAttributedString:[[NSAttributedString alloc] initWithString:buf
+                                                                    attributes:@{ NSFontAttributeName: baseFont,
+                                                                                  NSForegroundColorAttributeName: fg }]];
+        [buf setString:@""];
+    };
+
+    while (i < n)
+    {
+        unichar c = [text characterAtIndex:i];
+
+        if (c == '*' && i + 1 < n && [text characterAtIndex:i + 1] == '*')
+        {
+            NSRange r = [text rangeOfString:@"**" options:0 range:NSMakeRange(i + 2, n - i - 2)];
+            if (r.location != NSNotFound)
+            {
+                flush();
+                NSString *inner = [text substringWithRange:NSMakeRange(i + 2, r.location - i - 2)];
+                NSFont *bold = [[NSFontManager sharedFontManager] convertFont:baseFont toHaveTrait:NSBoldFontMask];
+                [out appendAttributedString:[[NSAttributedString alloc] initWithString:inner
+                                                                            attributes:@{ NSFontAttributeName: bold,
+                                                                                          NSForegroundColorAttributeName: fg }]];
+                i = r.location + 2;
+                continue;
+            }
+        }
+
+        if (c == '*' && (i + 1 >= n || [text characterAtIndex:i + 1] != '*'))
+        {
+            NSRange r = [text rangeOfString:@"*" options:0 range:NSMakeRange(i + 1, n - i - 1)];
+            if (r.location != NSNotFound && r.location > i + 1)
+            {
+                flush();
+                NSString *inner = [text substringWithRange:NSMakeRange(i + 1, r.location - i - 1)];
+                NSFont *it = [[NSFontManager sharedFontManager] convertFont:baseFont toHaveTrait:NSItalicFontMask];
+                [out appendAttributedString:[[NSAttributedString alloc] initWithString:inner
+                                                                            attributes:@{ NSFontAttributeName: it,
+                                                                                          NSForegroundColorAttributeName: fg }]];
+                i = r.location + 1;
+                continue;
+            }
+        }
+
+        if (c == '`')
+        {
+            NSRange r = [text rangeOfString:@"`" options:0 range:NSMakeRange(i + 1, n - i - 1)];
+            if (r.location != NSNotFound)
+            {
+                flush();
+                NSString *inner = [text substringWithRange:NSMakeRange(i + 1, r.location - i - 1)];
+                [out appendAttributedString:[[NSAttributedString alloc] initWithString:inner
+                                                                            attributes:@{ NSFontAttributeName: monoFont(baseFont.pointSize - 1),
+                                                                                          NSForegroundColorAttributeName: codeColor }]];
+                i = r.location + 1;
+                continue;
+            }
+        }
+
+        if (c == '[')
+        {
+            NSRange close = [text rangeOfString:@"](" options:0 range:NSMakeRange(i + 1, n - i - 1)];
+            if (close.location != NSNotFound)
+            {
+                NSRange endParen = [text rangeOfString:@")" options:0 range:NSMakeRange(close.location + 2, n - close.location - 2)];
+                if (endParen.location != NSNotFound)
+                {
+                    flush();
+                    NSString *label = [text substringWithRange:NSMakeRange(i + 1, close.location - i - 1)];
+                    [out appendAttributedString:[[NSAttributedString alloc] initWithString:label
+                                                                                attributes:@{ NSFontAttributeName: baseFont,
+                                                                                              NSForegroundColorAttributeName: linkColor }]];
+                    i = endParen.location + 1;
+                    continue;
+                }
+            }
+        }
+
+        [buf appendFormat:@"%C", c];
+        i++;
+    }
+    flush();
+}
+
+static NSAttributedString *renderMarkdown(NSString *src, NSColor *fg, NSColor *codeColor, NSColor *linkColor, NSColor *quoteColor)
+{
+    NSMutableAttributedString *out = [[NSMutableAttributedString alloc] init];
+    NSFont *body = [NSFont systemFontOfSize:14];
+    NSArray<NSString *> *lines = [src componentsSeparatedByString:@"\n"];
+    BOOL inCode = NO;
+    NSMutableString *codeBuf = [NSMutableString string];
+
+    void (^flushCode)(void) = ^{
+        if (!codeBuf.length) return;
+        NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
+        [ps setHeadIndent:14];
+        [ps setFirstLineHeadIndent:14];
+        [out appendAttributedString:[[NSAttributedString alloc] initWithString:codeBuf
+                                                                    attributes:@{ NSFontAttributeName: monoFont(12.5),
+                                                                                  NSForegroundColorAttributeName: codeColor,
+                                                                                  NSParagraphStyleAttributeName: ps }]];
+        [out appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"
+                                                                    attributes:@{ NSFontAttributeName: body }]];
+        [codeBuf setString:@""];
+    };
+
+    for (NSString *line in lines)
+    {
+        if ([line hasPrefix:@"```"])
+        {
+            if (inCode) flushCode();
+            inCode = !inCode;
+            continue;
+        }
+
+        if (inCode) { [codeBuf appendFormat:@"%@\n", line]; continue; }
+
+        if (!line.length)
+        {
+            [out appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"
+                                                                        attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:7] }]];
+            continue;
+        }
+
+        NSInteger level = 0;
+        while (level < 6 && level < (NSInteger)line.length && [line characterAtIndex:level] == '#') level++;
+        if (level > 0 && level < (NSInteger)line.length && [line characterAtIndex:level] == ' ')
+        {
+            CGFloat size = (level == 1) ? 26 : (level == 2 ? 21 : 17);
+            NSFont *hf = [[NSFontManager sharedFontManager]
+                          convertFont:[NSFont systemFontOfSize:size] toHaveTrait:NSBoldFontMask];
+            NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
+            [ps setParagraphSpacingBefore:10];
+            [ps setParagraphSpacing:4];
+            [out appendAttributedString:[[NSAttributedString alloc]
+                                         initWithString:[line substringFromIndex:level + 1]
+                                         attributes:@{ NSFontAttributeName: hf,
+                                                       NSForegroundColorAttributeName: fg,
+                                                       NSParagraphStyleAttributeName: ps }]];
+            [out appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"
+                                                                        attributes:@{ NSFontAttributeName: body }]];
+            continue;
+        }
+
+        if ([line hasPrefix:@"---"] || [line hasPrefix:@"***"])
+        {
+            [out appendAttributedString:[[NSAttributedString alloc]
+                                         initWithString:@"────────────────────────\n"
+                                         attributes:@{ NSFontAttributeName: body, NSForegroundColorAttributeName: quoteColor }]];
+            continue;
+        }
+
+        if ([line hasPrefix:@"- "] || [line hasPrefix:@"* "] || [line hasPrefix:@"+ "])
+        {
+            NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
+            [ps setHeadIndent:18];
+            [ps setFirstLineHeadIndent:4];
+            [out appendAttributedString:[[NSAttributedString alloc] initWithString:@"•  "
+                                                                        attributes:@{ NSFontAttributeName: body,
+                                                                                      NSForegroundColorAttributeName: fg,
+                                                                                      NSParagraphStyleAttributeName: ps }]];
+            appendInline(out, [line substringFromIndex:2], body, fg, codeColor, linkColor);
+            [out appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"
+                                                                        attributes:@{ NSFontAttributeName: body }]];
+            continue;
+        }
+
+        if ([line hasPrefix:@"> "])
+        {
+            NSFont *it = [[NSFontManager sharedFontManager] convertFont:body toHaveTrait:NSItalicFontMask];
+            NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
+            [ps setHeadIndent:16];
+            [ps setFirstLineHeadIndent:16];
+            [out appendAttributedString:[[NSAttributedString alloc]
+                                         initWithString:[[line substringFromIndex:2] stringByAppendingString:@"\n"]
+                                         attributes:@{ NSFontAttributeName: it,
+                                                       NSForegroundColorAttributeName: quoteColor,
+                                                       NSParagraphStyleAttributeName: ps }]];
+            continue;
+        }
+
+        appendInline(out, line, body, fg, codeColor, linkColor);
+        [out appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"
+                                                                    attributes:@{ NSFontAttributeName: body }]];
+    }
+    if (inCode) flushCode();
+    return out;
+}
+
+static NSAttributedString *renderJSON(NSString *src, NSColor *fg, NSColor *keyColor,
+                                      NSColor *strColor, NSColor *numColor, NSColor *boolColor)
+{
+    NSError *err = nil;
+    id obj = [NSJSONSerialization JSONObjectWithData:[src dataUsingEncoding:NSUTF8StringEncoding]
+                                             options:0 error:&err];
+    NSString *pretty = src;
+    if (obj)
+    {
+        NSData *d = [NSJSONSerialization dataWithJSONObject:obj
+                                                    options:(NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys)
+                                                      error:NULL];
+        if (d) pretty = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+    }
+    else
+    {
+        pretty = [NSString stringWithFormat:@"⚠ JSON 解析失敗：%@\n\n%@",
+                  err.localizedDescription ?: @"", src];
+    }
+
+    NSMutableAttributedString *out = [[NSMutableAttributedString alloc]
+                                      initWithString:pretty
+                                          attributes:@{ NSFontAttributeName: monoFont(12.5),
+                                                        NSForegroundColorAttributeName: fg }];
+
+    NSUInteger n = pretty.length;
+    if (n > 200000) return out;   // 太大就不上色
+
+    static NSRegularExpression *reKey, *reStr, *reNum, *reBool;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        reKey  = [NSRegularExpression regularExpressionWithPattern:@"\"([^\"\\\\]|\\\\.)*\"(?=\\s*:)" options:0 error:NULL];
+        reStr  = [NSRegularExpression regularExpressionWithPattern:@"\"([^\"\\\\]|\\\\.)*\"" options:0 error:NULL];
+        reNum  = [NSRegularExpression regularExpressionWithPattern:@"-?\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b" options:0 error:NULL];
+        reBool = [NSRegularExpression regularExpressionWithPattern:@"\\b(true|false|null)\\b" options:0 error:NULL];
+    });
+
+    NSRange all = NSMakeRange(0, n);
+    for (NSTextCheckingResult *m in [reKey matchesInString:pretty options:0 range:all])
+        [out addAttribute:NSForegroundColorAttributeName value:keyColor range:m.range];
+    for (NSTextCheckingResult *m in [reStr matchesInString:pretty options:0 range:all])
+        [out addAttribute:NSForegroundColorAttributeName value:strColor range:m.range];
+    for (NSTextCheckingResult *m in [reNum matchesInString:pretty options:0 range:all])
+        [out addAttribute:NSForegroundColorAttributeName value:numColor range:m.range];
+    for (NSTextCheckingResult *m in [reBool matchesInString:pretty options:0 range:all])
+        [out addAttribute:NSForegroundColorAttributeName value:boolColor range:m.range];
+
+    // key 要蓋在 string 之後
+    for (NSTextCheckingResult *m in [reKey matchesInString:pretty options:0 range:all])
+        [out addAttribute:NSForegroundColorAttributeName value:keyColor range:m.range];
+
+    return out;
+}
+
 //--------------------------------------------------------------------------------------------------
 #pragma mark 主題切換
 
@@ -3878,6 +4228,10 @@ static BOOL is_word_char(unichar c)
 - (void)reloadThemes:(id)sender
 {
     [[ThemeManager shared] reload];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(openDroppedFiles:)
+                                                 name:kSpadOpenFilesNotification
+                                               object:nil];
     [self rebuildThemeMenu];
     [self applyTheme:YES];
     [self flashStatus:[NSString stringWithFormat:T(@"已載入 %lu 個主題"),
@@ -3889,6 +4243,133 @@ static BOOL is_word_char(unichar c)
     NSString *dir = [[ThemeManager shared] userThemeDirectory];
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
     [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:dir]];
+}
+
+
+//--------------------------------------------------------------------------------------------------
+#pragma mark 預覽（Markdown / JSON）
+
+- (BOOL)docCanPreview:(Doc *)d
+{
+    NSString *ext = [[d.path pathExtension] lowercaseString];
+    return [@[ @"md", @"markdown", @"mdown", @"mkd", @"json", @"jsonc", @"json5" ] containsObject:ext];
+}
+
+- (void)updatePreviewButton
+{
+    Doc *d = (_active >= 0 && _active < (NSInteger)_docs.count) ? _docs[_active] : nil;
+    BOOL can = d && [self docCanPreview:d];
+    [_previewButton setHidden:!can];
+    if (can) [_previewButton setTitle:(d.previewing ? T(@"原始碼") : T(@"預覽"))];
+}
+
+- (NSString *)textOfDoc:(Doc *)d
+{
+    ScintillaView *e = d.view;
+    if (!e) return @"";
+    long len = [e getGeneralProperty:SCI_GETLENGTH];
+    if (len <= 0) return @"";
+    long cap = MIN(len, (long)(20 * 1024 * 1024));
+
+    char *buf = (char *)malloc(cap + 1);
+    [e message:SCI_GETTEXT wParam:(uptr_t)cap + 1 lParam:(sptr_t)buf];
+    buf[cap] = 0;
+    NSString *s = [[NSString alloc] initWithBytes:buf length:strlen(buf) encoding:NSUTF8StringEncoding];
+    free(buf);
+    return s ?: @"";
+}
+
+- (void)createPreviewForDoc:(Doc *)d
+{
+    Theme *t = [ThemeManager shared].current;
+    NSColor *bg = t ? [t background] : [NSColor textBackgroundColor];
+    NSColor *fg = t ? [t foreground] : [NSColor textColor];
+
+    NSScrollView *sv = [[NSScrollView alloc] initWithFrame:[_editorHost bounds]];
+    [sv setHasVerticalScroller:YES];
+    [sv setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    [sv setDrawsBackground:YES];
+    [sv setBackgroundColor:bg];
+
+    NSTextView *tv = [[NSTextView alloc] initWithFrame:[sv contentView].bounds];
+    [tv setEditable:NO];
+    [tv setSelectable:YES];
+    [tv setRichText:YES];
+    [tv setDrawsBackground:YES];
+    [tv setBackgroundColor:bg];
+    [tv setTextColor:fg];
+    [tv setTextContainerInset:NSMakeSize(28, 20)];
+    [tv setAutoresizingMask:NSViewWidthSizable];
+    [sv setDocumentView:tv];
+
+    d.previewScroll = sv;
+    d.previewText = tv;
+}
+
+- (void)renderPreviewForDoc:(Doc *)d
+{
+    if (!d.previewText) return;
+
+    Theme *t = [ThemeManager shared].current;
+    BOOL dark = t ? t.dark : YES;
+    NSColor *fg = t ? [t foreground] : [NSColor textColor];
+    NSColor *bg = t ? [t background] : [NSColor textBackgroundColor];
+    NSColor *code = dark ? hex_rgb(0xCE9178) : hex_rgb(0xA31515);
+    NSColor *link = dark ? hex_rgb(0x6CB6FF) : hex_rgb(0x0B6BCB);
+    NSColor *quote = dark ? hex_rgb(0x8A8F98) : hex_rgb(0x777777);
+
+    NSString *src = [self textOfDoc:d];
+    NSString *ext = [[d.path pathExtension] lowercaseString];
+    NSAttributedString *attr = nil;
+
+    if ([ext isEqualToString:@"json"] || [ext isEqualToString:@"jsonc"] || [ext isEqualToString:@"json5"])
+    {
+        attr = renderJSON(src, fg,
+                          dark ? hex_rgb(0x9CDCFE) : hex_rgb(0x0451A5),   // key
+                          dark ? hex_rgb(0xCE9178) : hex_rgb(0xA31515),   // string
+                          dark ? hex_rgb(0xB5CEA8) : hex_rgb(0x098658),   // number
+                          dark ? hex_rgb(0xC586C0) : hex_rgb(0xAF00DB));  // bool
+    }
+    else
+    {
+        attr = renderMarkdown(src, fg, code, link, quote);
+    }
+
+    [d.previewText setBackgroundColor:bg];
+    [d.previewText setTextColor:fg];
+    [[d.previewText textStorage] setAttributedString:attr];
+}
+
+- (void)togglePreview:(id)sender
+{
+    if (_active < 0) return;
+    Doc *d = _docs[_active];
+    if (![self docCanPreview:d]) return;
+
+    if (!d.previewScroll) [self createPreviewForDoc:d];
+
+    if (!d.previewing)
+    {
+        [self renderPreviewForDoc:d];
+        d.previewing = YES;
+        for (NSView *v in [_editorHost.subviews copy]) [v removeFromSuperview];
+        [d.previewScroll setFrame:[_editorHost bounds]];
+        [_editorHost addSubview:d.previewScroll];
+        [_window makeFirstResponder:d.previewText];
+    }
+    else
+    {
+        d.previewing = NO;
+        for (NSView *v in [_editorHost.subviews copy]) [v removeFromSuperview];
+        if (d.view)
+        {
+            [d.view setFrame:[_editorHost bounds]];
+            [_editorHost addSubview:d.view];
+            [_window makeFirstResponder:d.view];
+        }
+    }
+    [self updatePreviewButton];
+    [self updateStatus];
 }
 
 //--------------------------------------------------------------------------------------------------

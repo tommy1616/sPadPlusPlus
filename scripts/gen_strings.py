@@ -123,6 +123,8 @@ EN = {
     "同名檔案已存在": "A file with that name already exists",
     "無法重新命名": "Could not rename",
     "重新命名…": "Rename…",
+    "預覽": "Preview",
+    "原始碼": "Source",
 }
 
 

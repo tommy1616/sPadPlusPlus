@@ -29,6 +29,7 @@
 "不儲存" = "Don’t Save";
 "取消" = "Cancel";
 "就緒" = "Ready";
+"預覽" = "Preview";
 "關於 sPad++" = "About sPad++";
 "隱藏 sPad++" = "Hide sPad++";
 "結束 sPad++" = "Quit sPad++";
@@ -70,8 +71,8 @@
 "實際大小" = "Actual Size";
 "換行格式" = "Line Endings";
 "編碼" = "Encoding";
-"同名檔案已存在" = "A file with that name already exists";
 "無法重新命名" = "Could not rename";
+"同名檔案已存在" = "A file with that name already exists";
 "重新命名檔案" = "Rename File";
 "重新命名" = "Rename";
 "無法開啟 %@" = "Cannot open %@";
@@ -103,6 +104,7 @@
 "重新載入主題" = "Reload Themes";
 "開啟主題資料夾…" = "Open Themes Folder…";
 "已載入 %lu 個主題" = "Loaded %lu themes";
+"原始碼" = "Source";
 "已移除書籤" = "Bookmark removed";
 "已加入書籤" = "Bookmark added";
 "沒有書籤" = "No bookmarks";
