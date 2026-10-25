@@ -272,23 +272,30 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 - (void)tabBar:(TabBarView *)bar didClose:(NSInteger)index;
 - (void)tabBar:(TabBarView *)bar didMoveFrom:(NSInteger)from to:(NSInteger)to;
 - (void)tabBar:(TabBarView *)bar didDoubleClick:(NSInteger)index;
+- (void)tabBar:(TabBarView *)bar didRename:(NSInteger)index to:(NSString *)name;
 - (void)tabBarDidRequestNewTab:(TabBarView *)bar;
 @end
 
 //--------------------------------------------------------------------------------------------------
 #pragma mark - 分頁列（可拖曳排序、可橫向捲動）
 
-@interface TabBarView : NSView
+@interface TabBarView : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak)   id<TabBarDelegate> delegate;
 @property (nonatomic, strong) NSArray<Doc *> *docs;
 @property (nonatomic)         NSInteger selectedIndex;
 @property (nonatomic)         BOOL dark;
 - (void)ensureVisibleIndex:(NSInteger)index;
+- (void)beginRenameAtIndex:(NSInteger)index;
+- (void)cancelRename;
 @end
 
 @implementation TabBarView
 {
     NSInteger _hoverClose;
+    NSTextField *_renameField;
+    NSInteger _renameIndex;
+    BOOL _committingRename;
+    BOOL _startingRename;
     NSInteger _dragFrom;
     CGFloat   _dragStartX;
     BOOL      _dragging;
@@ -435,7 +442,8 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 
     if (e.clickCount == 2)
     {
-        [self.delegate tabBar:self didDoubleClick:i];
+        [self.delegate tabBar:self didSelect:i];
+        [self beginRenameAtIndex:i];
         return;
     }
 
@@ -463,6 +471,100 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 }
 
 - (void)mouseUp:(NSEvent *)e { _dragging = NO; }
+
+//--------------------------------------------------------------------------------------------------
+#pragma mark 行內重新命名
+
+- (void)beginRenameAtIndex:(NSInteger)index
+{
+    if (getenv("RNDEBUG"))
+        fprintf(stderr, "beginRename idx=%ld docs=%lu\n", (long)index, (unsigned long)self.docs.count);
+    if (index < 0 || index >= (NSInteger)self.docs.count) return;
+    [self cancelRename];
+
+    _renameIndex = index;
+
+    CGFloat x = -_scrollX;
+    for (NSInteger i = 0; i < index; i++) x += [self widthForDoc:self.docs[i]];
+    CGFloat w = [self widthForDoc:self.docs[index]];
+
+    Doc *d = self.docs[index];
+    NSString *base = d.path ? [[d.path lastPathComponent] stringByDeletingPathExtension] : T(@"未命名");
+
+    NSTextField *f = [[NSTextField alloc] initWithFrame:
+                      NSMakeRect(x + 8, 3, MAX(70.0, w - 16), self.bounds.size.height - 6)];
+    [f setFont:[NSFont systemFontOfSize:12]];
+    [f setBordered:NO];
+    [f setDrawsBackground:YES];
+    [f setBackgroundColor:(self.dark ? hex_rgb(0x1E1E1E) : [NSColor whiteColor])];
+    [f setTextColor:(self.dark ? hex_rgb(0xD4D4D4) : hex_rgb(0x1F1F1F))];
+    [f setFocusRingType:NSFocusRingTypeNone];
+    [f setStringValue:base];
+    [f setDelegate:self];
+    [self addSubview:f];
+    _renameField = f;
+    if (getenv("RNDEBUG")) fprintf(stderr, "beginRename field added, subviews=%lu\n", (unsigned long)self.subviews.count);
+
+    // 設定焦點的過程中可能會觸發 controlTextDidEndEditing（視窗不是 key window 時），
+    // 這時不能把它當成「使用者按了 Enter」而把輸入框收掉。
+    _startingRename = YES;
+    [self.window makeFirstResponder:f];
+    [f selectText:nil];
+    _startingRename = NO;
+    [self setNeedsDisplay:YES];
+}
+
+- (void)cancelRename
+{
+    if (!_renameField) return;
+    _committingRename = YES;
+    NSTextField *f = _renameField;
+    _renameField = nil;
+    [f removeFromSuperview];
+    _renameIndex = -1;
+    _committingRename = NO;
+    [self.window makeFirstResponder:[self.window contentView]];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)commitRename
+{
+    if (!_renameField) return;
+
+    NSString *name = [_renameField stringValue];
+    NSInteger idx = _renameIndex;
+    NSTextField *f = _renameField;
+
+    _committingRename = YES;
+    _renameField = nil;
+    [f removeFromSuperview];
+    _renameIndex = -1;
+    _committingRename = NO;
+
+    [self setNeedsDisplay:YES];
+    if (name.length) [self.delegate tabBar:self didRename:idx to:name];
+}
+
+- (BOOL)control:(NSControl *)control textView:(NSTextView *)tv doCommandBySelector:(SEL)sel
+{
+    if (sel == @selector(insertNewline:) || sel == @selector(insertNewlineIgnoringFieldEditor:))
+    {
+        [self commitRename];
+        return YES;
+    }
+    if (sel == @selector(cancelOperation:))
+    {
+        [self cancelRename];
+        return YES;
+    }
+    return NO;
+}
+
+- (void)controlTextDidEndEditing:(NSNotification *)n
+{
+    if (_committingRename || _startingRename || !_renameField) return;
+    [self commitRename];      // 點到別處 = 確認
+}
 
 - (void)scrollWheel:(NSEvent *)e
 {
@@ -1888,9 +1990,35 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
 
 - (void)tabBar:(TabBarView *)bar didDoubleClick:(NSInteger)index
 {
+    // 由 TabBarView 直接進入行內編輯，這裡不需要做事
+    (void)bar; (void)index;
+}
+
+- (void)tabBar:(TabBarView *)bar didRename:(NSInteger)index to:(NSString *)name
+{
     if (index < 0 || index >= (NSInteger)_docs.count) return;
     [self selectDoc:_docs[index]];
-    [self renameCurrentDocument:nil];
+
+    Doc *d = _docs[_active];
+
+    // 未命名：用行內輸入的名稱開「另存新檔」
+    if (!d.path)
+    {
+        NSSavePanel *p = [NSSavePanel savePanel];
+        [p setNameFieldStringValue:name.length ? name : T(@"未命名")];
+        if ([p runModal] == NSModalResponseOK)
+            [self writeDoc:d toPath:[[p URL] path]];
+        return;
+    }
+
+    NSString *err = nil;
+    if (![self renameDoc:d toBaseName:name error:&err])
+    {
+        NSAlert *e = [[NSAlert alloc] init];
+        [e setMessageText:T(@"無法重新命名")];
+        [e setInformativeText:err ?: @""];
+        [e runModal];
+    }
 }
 
 // 只做檔案搬移，不碰 UI，方便測試
@@ -2577,6 +2705,29 @@ static void hc_log(NSString *fmt, ...)
         }
     }
     fprintf(stdout, "CLOSE churn ok, docs=%lu\n", (unsigned long)_docs.count); fflush(stdout);
+
+    // 行內重新命名（UI 路徑）
+    {
+        [self selectDoc:_docs[0]];
+        [_tabBar beginRenameAtIndex:0];
+        NSTextField *tf = nil;
+        fprintf(stdout, "INLINE subviews=%lu:", (unsigned long)_tabBar.subviews.count);
+        for (NSView *v in _tabBar.subviews)
+        {
+            fprintf(stdout, " %s", [NSStringFromClass([v class]) UTF8String]);
+            if ([v isKindOfClass:[NSTextField class]]) tf = (NSTextField *)v;
+        }
+        fprintf(stdout, "\nINLINE field=%s\n", tf ? "yes" : "no");
+        if (tf)
+        {
+            [tf setStringValue:@"inline_test"];
+            saveWindowPNG(_window, @"/tmp/rename_ui.png");
+            [_tabBar control:nil textView:nil doCommandBySelector:@selector(insertNewline:)];
+            fprintf(stdout, "INLINE after commit path=%s\n",
+                    [[_docs[0].path lastPathComponent] UTF8String]);
+        }
+        fflush(stdout);
+    }
 
     // 重新命名測試
     {
