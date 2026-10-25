@@ -135,8 +135,16 @@ Notepad++ 的 Win32 層負責的東西——訊息迴圈、對話框、docking�
 - `macapp/build-icons.sh`：有 Xcode 26 時用 `actool` 編成 `Assets.car`（滿版圖示）；
   沒有就退回舊式 `.icns`（會被 macOS 26 套上白色底座）
 
-> **踩過的坑**：`.icon` 裡如果放多個 group，第二個之後會被系統當成「漂浮玻璃層」
+> **踩過的坑 1**：`.icon` 裡如果放多個 group，第二個之後會被系統當成「漂浮玻璃層」
 > 而整片模糊掉。所以主視覺必須**壓成一張圖、只用一個 group**。
+>
+> **踩過的坑 2**：換完圖示一定要清快取，否則 Dock / Finder 會一直顯示舊圖：
+>
+> ```bash
+> make refresh-icon
+> ```
+>
+> 它會關掉 App、重註冊 LaunchServices、清掉 `com.apple.iconservices` 快取並重啟 Dock。
 
 ## 設成預設的文字開啟程式
 

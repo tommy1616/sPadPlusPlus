@@ -31,7 +31,7 @@ OBJS      := $(CORE_OBJ) $(COCOA_OBJ) $(STUB_OBJ) $(UCH_OBJ) $(MAIN_OBJ)
 LEXILLA_A := $(LX)/bin/liblexilla.a
 BIN       := $(BUNDLE)/Contents/MacOS/$(APP)
 
-.PHONY: all run clean check-lexilla icons deps
+.PHONY: all run clean check-lexilla icons deps refresh-icon
 
 all: $(BIN)
 
@@ -85,6 +85,16 @@ run: all
 
 icons:
 	@./build-icons.sh
+
+# 換完圖示後一定要跑這個，否則 Dock / Finder 會一直顯示舊圖示
+refresh-icon:
+	@-pkill -f 'Contents/MacOS/sPad[+]' 2>/dev/null
+	@LS=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister; \
+	 "$$LS" -u "$(CURDIR)/$(BUNDLE)" 2>/dev/null; "$$LS" -f "$(CURDIR)/$(BUNDLE)" 2>/dev/null; true
+	@-killall iconservicesagent 2>/dev/null
+	@-rm -rf "$$(getconf DARWIN_USER_CACHE_DIR)com.apple.iconservices"* 2>/dev/null
+	@-killall Dock 2>/dev/null
+	@echo "圖示快取已清除；重新開啟 App 即可看到新圖示"
 
 clean:
 	rm -rf $(BUILD) $(BUNDLE) AppIcon.iconset
