@@ -173,6 +173,14 @@ clang -framework Cocoa -framework UniformTypeIdentifiers -o setdef scripts/set-d
 
 > 換掉 App 路徑（搬動、改名）後要重設一次；建議把 App 放到 `/Applications`。
 
+## 已知問題與處理
+
+- **關分頁時可能閃退（SIGBUS in `-[ScintillaView dealloc]`）**
+  ScintillaView 在 dealloc 時會呼叫 `removeObserver:`，若此時它還是視窗的 first responder，
+  AppKit 與 CoreFoundation 會二次存取已釋放的物件。處理方式：
+  關分頁前先把 first responder 移開，並把 view 放進**回收池**重複使用，
+  整個 session 不銷毀（`recycleView:`）。
+
 ## 授權
 
 **GPL-3.0-or-later**，完整條文見 [LICENSE](LICENSE)，第三方元件見 [NOTICE](NOTICE)。

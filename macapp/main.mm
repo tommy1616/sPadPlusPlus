@@ -1281,6 +1281,11 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     BOOL           _uiCheck;
     BOOL           _hideCheck;
     BOOL           _hidePanel;
+    BOOL           _scrollBench;
+    BOOL           _scrollStress;
+    BOOL           _closeCheck;
+    NSTimer       *_stressTimer;
+    int            _stressTicks;
     BOOL           _editCheck;
     NSMutableArray *_openPaths;    // 命令列要開的檔
     double         _tLoad;
@@ -1288,10 +1293,13 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     FindPanel     *_findPanel;
     NSMutableArray *_findRanges;
     NSString       *_lastWord;
+    NSString       *_lastStatusLeft;
+    NSString       *_lastStatusRight;
     BOOL            _showWS;
     BOOL            _showEOL;
     NSMenu         *_themeMenu;
     NSMutableArray *_pendingOpen;
+    NSMutableArray *_viewPool;
     id              _fifJob;
     NSUInteger      _fifGen;
     BOOL            _fifRunning;
@@ -1322,6 +1330,9 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         else if ([a isEqualToString:@"--uicheck"])    _uiCheck = YES;
         else if ([a isEqualToString:@"--hidecheck"])  _hideCheck = YES;
         else if ([a isEqualToString:@"--hidepanel"])  _hidePanel = YES;
+        else if ([a isEqualToString:@"--scrollbench"]) _scrollBench = YES;
+        else if ([a isEqualToString:@"--scrollstress"]) _scrollStress = YES;
+        else if ([a isEqualToString:@"--closecheck"]) _closeCheck = YES;
         else if ([a isEqualToString:@"--editcheck"])  _editCheck = YES;
         else if ([a hasPrefix:@"-AppleLanguages"] || [a hasPrefix:@"-AppleLocale"])
         {
@@ -1361,7 +1372,13 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     [_window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
 
-    if (_editCheck)
+    if (_closeCheck)
+        [self performSelector:@selector(doCloseCheck) withObject:nil afterDelay:0.8];
+    else if (_scrollStress)
+        [self performSelector:@selector(doScrollStress) withObject:nil afterDelay:0.8];
+    else if (_scrollBench)
+        [self performSelector:@selector(doScrollBench) withObject:nil afterDelay:0.8];
+    else if (_editCheck)
         [self performSelector:@selector(doEditCheck) withObject:nil afterDelay:0.8];
     else if (_hideCheck)
         [self performSelector:@selector(doHideCheck) withObject:nil afterDelay:1.5];
@@ -1392,7 +1409,7 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)s
 {
     npp_log(@"shouldTerminate requested (automation=%d)", (int)(_bench || _snapshotPath || _uiCheck || _hideCheck));
-    if (_bench || _snapshotPath || _uiCheck || _hideCheck || _editCheck) return NSTerminateNow;   // 自動化模式不要跳存檔提示
+    if (_bench || _snapshotPath || _uiCheck || _hideCheck || _editCheck || _scrollBench || _scrollStress || _closeCheck) return NSTerminateNow;   // 自動化模式不要跳存檔提示
 
     for (Doc *d in _docs)
     {
@@ -1738,10 +1755,43 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
 - (ScintillaView *)makeEditor
 {
     NSRect r = [_editorHost bounds];
-    ScintillaView *e = [[ScintillaView alloc] initWithFrame:r];
+    ScintillaView *e = nil;
+
+    if (_viewPool.count)
+    {
+        e = _viewPool.lastObject;
+        [_viewPool removeLastObject];
+        [e setFrame:r];
+    }
+    else
+    {
+        e = [[ScintillaView alloc] initWithFrame:r];
+    }
+
     [e setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [e setEditable:YES];
+    [e setDelegate:nil];
     return e;
+}
+
+// 關分頁時不要把 ScintillaView 直接釋放：
+// 它在 dealloc 期間會被 AppKit/CoreFoundation 二次存取而爆掉（SIGBUS in ~[ScintillaView dealloc]）。
+// 改成回收再利用，整個 session 都不會 dealloc。
+- (void)recycleView:(ScintillaView *)v
+{
+    if (!v) return;
+
+    if ([_window firstResponder] == (id)v) [_window makeFirstResponder:_tabBar];
+    [v setDelegate:nil];
+    [v removeFromSuperview];
+
+    [v message:SCI_SETUNDOCOLLECTION wParam:0];
+    [v message:SCI_CLEARALL];
+    [v message:SCI_EMPTYUNDOBUFFER];
+    [v message:SCI_SETUNDOCOLLECTION wParam:1];
+
+    if (!_viewPool) _viewPool = [NSMutableArray array];
+    if (_viewPool.count < 3) [_viewPool addObject:v];
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1763,13 +1813,17 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     if (_active >= 0 && _active < (NSInteger)_docs.count)
     {
         Doc *old = _docs[_active];
-        old.caret = [old.view getGeneralProperty:SCI_GETCURRENTPOS];
-        old.firstVisibleLine = [old.view getGeneralProperty:SCI_GETFIRSTVISIBLELINE];
-        old.view.delegate = nil;
+        if (old.view)
+        {
+            old.caret = [old.view getGeneralProperty:SCI_GETCURRENTPOS];
+            old.firstVisibleLine = [old.view getGeneralProperty:SCI_GETFIRSTVISIBLELINE];
+            old.view.delegate = nil;
+        }
     }
 
     // 換 view
     for (NSView *v in [_editorHost.subviews copy]) [v removeFromSuperview];
+    if (!doc.view) doc.view = [self makeEditor];
     doc.view.delegate = self;
     [doc.view setFrame:[_editorHost bounds]];
     [_editorHost addSubview:doc.view];
@@ -1810,9 +1864,9 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
         if ([d isDirty]) return;   // 使用者取消存檔
     }
 
-    [d.view removeFromSuperview];
+    [self recycleView:d.view];
+    d.view = nil;
     [_docs removeObjectAtIndex:index];
-    d.view.delegate = nil;
 
     if (_docs.count == 0) { [self newDocument:nil]; return; }
 
@@ -2016,7 +2070,8 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     Doc *d = _docs[_active];
     if (!d.path) return;
     NSString *p = d.path;
-    [d.view removeFromSuperview];
+    [self recycleView:d.view];
+    d.view = nil;
     [_docs removeObjectAtIndex:_active];
     _active = -1;
     [self openPath:p];
@@ -2179,17 +2234,32 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     NSString *enc = d.encoding;
     if (d.hasBOM) enc = [enc stringByAppendingString:@" BOM"];
 
-    [_statusLeft setStringValue:[NSString stringWithFormat:T(@"%@   ·   %ld 行   ·   %@"),
-                                 [d title], lines, human_bytes(bytes)]];
-    [_statusRight setStringValue:[NSString stringWithFormat:T(@"%@   ·   %@   ·   行 %ld，欄 %ld   ·   %ld 字元選取   ·   載入 %.0f ms"),
-                                enc, d.eol, line + 1, col + 1, selLen, _tLoad]];
-    [_tabBar setNeedsDisplay:YES];
+    NSString *left = [NSString stringWithFormat:T(@"%@   ·   %ld 行   ·   %@"),
+                      [d title], lines, human_bytes(bytes)];
+    NSString *right = [NSString stringWithFormat:T(@"%@   ·   %@   ·   行 %ld，欄 %ld   ·   %ld 字元選取   ·   載入 %.0f ms"),
+                       enc, d.eol, line + 1, col + 1, selLen, _tLoad];
+
+    // 只在內容真的變了才動 UI（捲動時這裡每幀都會被呼叫）
+    if (![left isEqualToString:_lastStatusLeft])
+    {
+        _lastStatusLeft = [left copy];
+        [_statusLeft setStringValue:left];
+    }
+    if (![right isEqualToString:_lastStatusRight])
+    {
+        _lastStatusRight = [right copy];
+        [_statusRight setStringValue:right];
+    }
 }
 
 - (void)notification:(SCNotification *)scn
 {
     if (scn->nmhdr.code == SCN_UPDATEUI)
     {
+        // SC_UPDATE_V_SCROLL 只代表「畫面捲動」，游標與內容都沒變：
+        // 這時候不需要更新狀態列、括號配對或單字高亮。
+        if (scn->updated != 0 && (scn->updated & ~SC_UPDATE_V_SCROLL) == 0) return;
+
         [self updateStatus];
         [self updateBraceHighlight];
         [self updateWordHighlight];
@@ -2391,6 +2461,104 @@ static void hc_log(NSString *fmt, ...)
     if (f) { fputs([line UTF8String], f); fclose(f); }
 }
 
+
+
+
+
+- (void)doCloseCheck
+{
+    fprintf(stdout, "CLOSE docs=%lu\n", (unsigned long)_docs.count); fflush(stdout);
+
+    // 依序關閉每一個分頁
+    while (_docs.count > 1)
+    {
+        fprintf(stdout, "CLOSE closing index 1 of %lu\n", (unsigned long)_docs.count); fflush(stdout);
+        [self tabBar:_tabBar didClose:1];
+        fprintf(stdout, "CLOSE ok, docs=%lu\n", (unsigned long)_docs.count); fflush(stdout);
+    }
+
+    // 再開幾個再關掉，測重複使用
+    for (int i = 0; i < 60; i++)
+    {
+        @autoreleasepool
+        {
+            [self newDocument:nil];
+            [self tabBar:_tabBar didClose:(NSInteger)_docs.count - 1];
+        }
+    }
+    fprintf(stdout, "CLOSE churn ok, docs=%lu\n", (unsigned long)_docs.count); fflush(stdout);
+
+    [NSApp terminate:nil];
+}
+
+- (void)doScrollStress
+{
+    [_window makeKeyAndOrderFront:nil];
+    _stressTicks = 0;
+    _stressTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0
+                                                    target:self
+                                                  selector:@selector(stressTick)
+                                                  userInfo:nil
+                                                   repeats:YES];
+}
+
+- (void)stressTick
+{
+    ScintillaView *e = [self editor];
+    [e message:SCI_LINESCROLL wParam:0 lParam:((_stressTicks / 60) % 2 ? -3 : 3)];
+    _stressTicks++;
+    if (_stressTicks > 60 * 8)
+    {
+        [_stressTimer invalidate];
+        fprintf(stdout, "STRESS done %d ticks\n", _stressTicks);
+        fflush(stdout);
+        [NSApp terminate:nil];
+    }
+}
+
+- (void)doScrollBench
+{
+    [_window makeKeyAndOrderFront:nil];
+    [self performSelector:@selector(runScrollBench) withObject:nil afterDelay:0.6];
+}
+
+static int cmp_double(const void *a, const void *b)
+{
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x < y) ? -1 : (x > y);
+}
+
+- (void)runScrollBench
+{
+    ScintillaView *e = [self editor];
+    NSView *root = [[_window contentView] superview];
+    if (!e) { fprintf(stdout, "SCROLL no editor\n"); [NSApp terminate:nil]; return; }
+
+    const int N = 300;
+    double t[N];
+    long lines = [e getGeneralProperty:SCI_GETLINECOUNT];
+
+    for (int i = 0; i < N; i++)
+    {
+        double t0 = now_ms();
+        [e message:SCI_LINESCROLL wParam:0 lParam:(i < N / 2 ? 4 : -4)];
+        [root display];
+        t[i] = now_ms() - t0;
+    }
+
+    double sum = 0, max = 0;
+    int slow = 0;
+    for (int i = 0; i < N; i++) { sum += t[i]; if (t[i] > max) max = t[i]; if (t[i] > 16.7) slow++; }
+    double sorted[N];
+    memcpy(sorted, t, sizeof(t));
+    qsort(sorted, N, sizeof(double), cmp_double);
+
+    fprintf(stdout,
+            "SCROLL lines=%ld steps=%d avg=%.2fms p50=%.2f p95=%.2f max=%.2f slow(>16.7ms)=%d/%d\n",
+            lines, N, sum / N, sorted[N / 2], sorted[(int)(N * 0.95)], max, slow, N);
+    fflush(stdout);
+    [NSApp terminate:nil];
+}
 
 - (void)doEditCheck
 {
