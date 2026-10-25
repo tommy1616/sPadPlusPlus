@@ -38,6 +38,7 @@
 "關閉分頁" = "Close Tab";
 "另存新檔…" = "Save As…";
 "從磁碟重新載入" = "Reload from Disk";
+"重新命名…" = "Rename…";
 "執行載入效能測試…" = "Run Load Benchmark…";
 "編輯" = "Edit";
 "復原" = "Undo";
@@ -69,6 +70,10 @@
 "實際大小" = "Actual Size";
 "換行格式" = "Line Endings";
 "編碼" = "Encoding";
+"同名檔案已存在" = "A file with that name already exists";
+"無法重新命名" = "Could not rename";
+"重新命名檔案" = "Rename File";
+"重新命名" = "Rename";
 "無法開啟 %@" = "Cannot open %@";
 "不支援 %@ 編碼" = "%@ encoding is not supported";
 "有字元無法用 %@ 編碼表示" = "Some characters cannot be represented in %@";

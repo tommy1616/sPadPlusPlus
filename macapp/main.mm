@@ -271,6 +271,7 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
 - (void)tabBar:(TabBarView *)bar didSelect:(NSInteger)index;
 - (void)tabBar:(TabBarView *)bar didClose:(NSInteger)index;
 - (void)tabBar:(TabBarView *)bar didMoveFrom:(NSInteger)from to:(NSInteger)to;
+- (void)tabBar:(TabBarView *)bar didDoubleClick:(NSInteger)index;
 - (void)tabBarDidRequestNewTab:(TabBarView *)bar;
 @end
 
@@ -429,6 +430,12 @@ static NSData *normalize_eol(NSData *utf8, NSString *eol)
     if (isClose)
     {
         [self.delegate tabBar:self didClose:i];
+        return;
+    }
+
+    if (e.clickCount == 2)
+    {
+        [self.delegate tabBar:self didDoubleClick:i];
         return;
     }
 
@@ -1526,6 +1533,8 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
     [fileMenu addItemWithTitle:T(@"儲存") action:@selector(saveDocument:) keyEquivalent:@"s"];
     [fileMenu addItemWithTitle:T(@"另存新檔…") action:@selector(saveDocumentAs:) keyEquivalent:@"S"];
     [fileMenu addItemWithTitle:T(@"從磁碟重新載入") action:@selector(reloadDocument:) keyEquivalent:@"r"];
+    NSMenuItem *renameItem = [fileMenu addItemWithTitle:T(@"重新命名…") action:@selector(renameCurrentDocument:) keyEquivalent:@"R"];
+    [renameItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItemWithTitle:T(@"執行載入效能測試…") action:@selector(runBenchmark:) keyEquivalent:@"b"];
 
@@ -1876,6 +1885,87 @@ static NSColor *theme_color(NSString *hex, NSColor *fallback)
 }
 
 - (void)tabBarDidRequestNewTab:(TabBarView *)bar { [self newDocument:nil]; }
+
+- (void)tabBar:(TabBarView *)bar didDoubleClick:(NSInteger)index
+{
+    if (index < 0 || index >= (NSInteger)_docs.count) return;
+    [self selectDoc:_docs[index]];
+    [self renameCurrentDocument:nil];
+}
+
+// 只做檔案搬移，不碰 UI，方便測試
+- (BOOL)renameDoc:(Doc *)d toBaseName:(NSString *)base error:(NSString **)errOut
+{
+    if (!d.path) return NO;
+
+    NSString *name = [base stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!name.length) return NO;
+
+    // 使用者沒打副檔名就沿用原本的
+    NSString *ext = [d.path pathExtension];
+    if (![name pathExtension].length && ext.length) name = [name stringByAppendingPathExtension:ext];
+
+    NSString *dir = [d.path stringByDeletingLastPathComponent];
+    NSString *dst = [dir stringByAppendingPathComponent:name];
+    if ([dst isEqualToString:d.path]) return YES;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if ([fm fileExistsAtPath:dst])
+    {
+        if (errOut) *errOut = T(@"同名檔案已存在");
+        return NO;
+    }
+
+    NSError *e = nil;
+    if (![fm moveItemAtPath:d.path toPath:dst error:&e])
+    {
+        if (errOut) *errOut = [e localizedDescription] ?: T(@"無法重新命名");
+        return NO;
+    }
+
+    d.path = dst;
+    [self updateWindowTitle];
+    [self updateStatus];
+    [_tabBar setNeedsDisplay:YES];
+    [self saveSession];
+    return YES;
+}
+
+- (void)renameCurrentDocument:(id)sender
+{
+    if (_active < 0) return;
+    Doc *d = _docs[_active];
+
+    // 還沒存檔的，直接走「另存新檔」
+    if (!d.path) { [self saveDocumentAs:nil]; return; }
+
+    NSAlert *a = [[NSAlert alloc] init];
+    [a setMessageText:T(@"重新命名檔案")];
+    [a setInformativeText:[d.path stringByDeletingLastPathComponent]];
+    [a addButtonWithTitle:T(@"重新命名")];
+    [a addButtonWithTitle:T(@"取消")];
+
+    NSTextField *f = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+    NSString *ext = [d.path pathExtension];
+    NSString *base = [[d.path lastPathComponent] stringByDeletingPathExtension];
+    [f setStringValue:base];
+    [a setAccessoryView:f];
+
+    if ([a runModal] != NSAlertFirstButtonReturn) return;
+
+    NSString *typed = [f stringValue];
+    if (![typed pathExtension].length && ext.length)
+        typed = [typed stringByAppendingPathExtension:ext];
+
+    NSString *err = nil;
+    if (![self renameDoc:d toBaseName:typed error:&err])
+    {
+        NSAlert *e = [[NSAlert alloc] init];
+        [e setMessageText:T(@"無法重新命名")];
+        [e setInformativeText:err ?: @""];
+        [e runModal];
+    }
+}
 
 - (void)closeActiveTab:(id)sender
 {
@@ -2487,6 +2577,20 @@ static void hc_log(NSString *fmt, ...)
         }
     }
     fprintf(stdout, "CLOSE churn ok, docs=%lu\n", (unsigned long)_docs.count); fflush(stdout);
+
+    // 重新命名測試
+    {
+        Doc *d = _docs[0];
+        NSString *orig = d.path;
+        NSString *err = nil;
+        BOOL ok1 = [self renameDoc:d toBaseName:@"renamed_test" error:&err];
+        fprintf(stdout, "RENAME to renamed_test: %d err=%s -> %s\n",
+                (int)ok1, err ? [err UTF8String] : "-", [[d.path lastPathComponent] UTF8String]);
+        NSString *err2 = nil;
+        BOOL ok2 = [self renameDoc:d toBaseName:@"conflict" error:&err2];
+        fprintf(stdout, "RENAME conflict: %d err=%s\n", (int)ok2, err2 ? [err2 UTF8String] : "-");
+        (void)orig;
+    }
 
     [NSApp terminate:nil];
 }

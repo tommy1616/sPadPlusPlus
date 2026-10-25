@@ -118,6 +118,11 @@ EN = {
     "請先在尋找面板輸入文字": "Type something in the Find panel first",
     "已標記 %ld 行": "Marked %ld line(s)",
     "已清除標記": "Marks cleared",
+    "重新命名檔案": "Rename File",
+    "重新命名": "Rename",
+    "同名檔案已存在": "A file with that name already exists",
+    "無法重新命名": "Could not rename",
+    "重新命名…": "Rename…",
 }
 
 
